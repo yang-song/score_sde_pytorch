@@ -51,8 +51,8 @@ def register_model(cls=None, *, name=None):
       local_name = cls.__name__
     else:
       local_name = name
-    if local_name in _MODELS:
-      raise ValueError(f'Already registered model with name: {local_name}')
+    #if local_name in _MODELS:
+    #  raise ValueError(f'Already registered model with name: {local_name}')
     _MODELS[local_name] = cls
     return cls
 

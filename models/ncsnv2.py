@@ -16,14 +16,13 @@
 # pylint: skip-file
 """The NCSNv2 model."""
 
-import flax.linen as nn
+import torch.nn as nn
 import functools
 
 from .utils import get_sigmas, register_model
 from .layers import (CondRefineBlock, RefineBlock, ResidualBlock, ncsn_conv3x3,
                      ConditionalResidualBlock, get_act)
 from .normalization import get_normalization
-import ml_collections
 
 CondResidualBlock = ConditionalResidualBlock
 conv3x3 = ncsn_conv3x3
@@ -43,314 +42,375 @@ def get_network(config):
 
 @register_model(name='ncsnv2_64')
 class NCSNv2(nn.Module):
-  """NCSNv2 model architecture."""
-  config: ml_collections.ConfigDict
+  def __init__(self, config):
+    super().__init__()
+    self.centered = config.data.centered
+    self.norm = get_normalization(config)
+    self.nf = nf = config.model.nf
 
-  @nn.compact
-  def __call__(self, x, labels, train=True):
-    # config parsing
-    config = self.config
-    nf = config.model.nf
-    act = get_act(config)
-    normalizer = get_normalization(config)
-    sigmas = get_sigmas(config)
-    interpolation = config.model.interpolation
+    self.act = act = get_act(config)
+    self.sigmas = get_sigmas(config)
+    self.config = config
 
-    if not config.data.centered:
+    self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
+
+    self.normalizer = self.norm(nf, config.model.num_scales)
+    self.end_conv = nn.Conv2d(nf, config.data.channels, 3, stride=1, padding=1)
+
+    self.res1 = nn.ModuleList([
+      ResidualBlock(self.nf, self.nf, resample=None, act=act,
+                    normalization=self.norm),
+      ResidualBlock(self.nf, self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res2 = nn.ModuleList([
+      ResidualBlock(self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res3 = nn.ModuleList([
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm, dilation=2),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm, dilation=2)]
+    )
+
+    if config.data.image_size == 28:
+      self.res4 = nn.ModuleList([
+        ResidualBlock(2 * self.nf, 2 * self.nf, resample='down', act=act,
+                      normalization=self.norm, adjust_padding=True, dilation=4),
+        ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                      normalization=self.norm, dilation=4)]
+      )
+    else:
+      self.res4 = nn.ModuleList([
+        ResidualBlock(2 * self.nf, 2 * self.nf, resample='down', act=act,
+                      normalization=self.norm, adjust_padding=False, dilation=4),
+        ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                      normalization=self.norm, dilation=4)]
+      )
+
+    self.refine1 = RefineBlock([2 * self.nf], 2 * self.nf, act=act, start=True)
+    self.refine2 = RefineBlock([2 * self.nf, 2 * self.nf], 2 * self.nf, act=act)
+    self.refine3 = RefineBlock([2 * self.nf, 2 * self.nf], self.nf, act=act)
+    self.refine4 = RefineBlock([self.nf, self.nf], self.nf, act=act, end=True)
+
+  def _compute_cond_module(self, module, x):
+    for m in module:
+      x = m(x)
+    return x
+
+  def forward(self, x, y):
+    if not self.centered:
       h = 2 * x - 1.
     else:
       h = x
 
-    h = conv3x3(h, nf, stride=1, bias=True)
-    # ResNet backbone
-    h = ResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h)
-    layer1 = ResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf, resample='down', act=act, normalization=normalizer)(layer1)
-    layer2 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf,
-                      resample='down',
-                      act=act,
-                      normalization=normalizer,
-                      dilation=2)(layer2)
-    layer3 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer, dilation=2)(h)
-    h = ResidualBlock(2 * nf,
-                      resample='down',
-                      act=act,
-                      normalization=normalizer,
-                      dilation=4)(layer3)
-    layer4 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer, dilation=4)(h)
-    # U-Net with RefineBlocks
-    ref1 = RefineBlock(layer4.shape[1:3],
-                       2 * nf,
-                       act=act,
-                       interpolation=interpolation,
-                       start=True)([layer4])
-    ref2 = RefineBlock(layer3.shape[1:3],
-                       2 * nf,
-                       interpolation=interpolation,
-                       act=act)([layer3, ref1])
-    ref3 = RefineBlock(layer2.shape[1:3],
-                       2 * nf,
-                       interpolation=interpolation,
-                       act=act)([layer2, ref2])
-    ref4 = RefineBlock(layer1.shape[1:3],
-                       nf,
-                       interpolation=interpolation,
-                       act=act,
-                       end=True)([layer1, ref3])
+    output = self.begin_conv(h)
 
-    h = normalizer()(ref4)
-    h = act(h)
-    h = conv3x3(h, x.shape[-1])
+    layer1 = self._compute_cond_module(self.res1, output)
+    layer2 = self._compute_cond_module(self.res2, layer1)
+    layer3 = self._compute_cond_module(self.res3, layer2)
+    layer4 = self._compute_cond_module(self.res4, layer3)
 
-    # When using the DDPM loss, no need of normalizing the output
-    if config.model.scale_by_sigma:
-      used_sigmas = sigmas[labels].reshape(
-        (x.shape[0], *([1] * len(x.shape[1:]))))
-      return h / used_sigmas
-    else:
-      return h
+    ref1 = self.refine1([layer4], layer4.shape[2:])
+    ref2 = self.refine2([layer3, ref1], layer3.shape[2:])
+    ref3 = self.refine3([layer2, ref2], layer2.shape[2:])
+    output = self.refine4([layer1, ref3], layer1.shape[2:])
+
+    output = self.normalizer(output)
+    output = self.act(output)
+    output = self.end_conv(output)
+
+    used_sigmas = self.sigmas[y].view(x.shape[0], *([1] * len(x.shape[1:])))
+
+    output = output / used_sigmas
+
+    return output
 
 
 @register_model(name='ncsn')
 class NCSN(nn.Module):
-  """NCSNv1 model architecture."""
-  config: ml_collections.ConfigDict
+  def __init__(self, config):
+    super().__init__()
+    self.centered = config.data.centered
+    self.norm = get_normalization(config)
+    self.nf = nf = config.model.nf
+    self.act = act = get_act(config)
+    self.config = config
 
-  @nn.compact
-  def __call__(self, x, labels, train=True):
-    # config parsing
-    config = self.config
-    nf = config.model.nf
-    act = get_act(config)
-    normalizer = get_normalization(config, conditional=True)
-    sigmas = get_sigmas(config)
-    interpolation = config.model.interpolation
+    self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
 
-    if not config.data.centered:
+    self.normalizer = self.norm(nf, config.model.num_scales)
+    self.end_conv = nn.Conv2d(nf, config.data.channels, 3, stride=1, padding=1)
+
+    self.res1 = nn.ModuleList([
+      ConditionalResidualBlock(self.nf, self.nf, config.model.num_scales, resample=None, act=act,
+                               normalization=self.norm),
+      ConditionalResidualBlock(self.nf, self.nf, config.model.num_scales, resample=None, act=act,
+                               normalization=self.norm)]
+    )
+
+    self.res2 = nn.ModuleList([
+      ConditionalResidualBlock(self.nf, 2 * self.nf, config.model.num_scales, resample='down', act=act,
+                               normalization=self.norm),
+      ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample=None, act=act,
+                               normalization=self.norm)]
+    )
+
+    self.res3 = nn.ModuleList([
+      ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample='down', act=act,
+                               normalization=self.norm, dilation=2),
+      ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample=None, act=act,
+                               normalization=self.norm, dilation=2)]
+    )
+
+    if config.data.image_size == 28:
+      self.res4 = nn.ModuleList([
+        ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample='down', act=act,
+                                 normalization=self.norm, adjust_padding=True, dilation=4),
+        ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample=None, act=act,
+                                 normalization=self.norm, dilation=4)]
+      )
+    else:
+      self.res4 = nn.ModuleList([
+        ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample='down', act=act,
+                                 normalization=self.norm, adjust_padding=False, dilation=4),
+        ConditionalResidualBlock(2 * self.nf, 2 * self.nf, config.model.num_scales, resample=None, act=act,
+                                 normalization=self.norm, dilation=4)]
+      )
+
+    self.refine1 = CondRefineBlock([2 * self.nf], 2 * self.nf, config.model.num_scales, self.norm, act=act, start=True)
+    self.refine2 = CondRefineBlock([2 * self.nf, 2 * self.nf], 2 * self.nf, config.model.num_scales, self.norm, act=act)
+    self.refine3 = CondRefineBlock([2 * self.nf, 2 * self.nf], self.nf, config.model.num_scales, self.norm, act=act)
+    self.refine4 = CondRefineBlock([self.nf, self.nf], self.nf, config.model.num_scales, self.norm, act=act, end=True)
+
+  def _compute_cond_module(self, module, x, y):
+    for m in module:
+      x = m(x, y)
+    return x
+
+  def forward(self, x, y):
+    if not self.centered:
       h = 2 * x - 1.
     else:
       h = x
 
-    h = conv3x3(h, nf, stride=1, bias=True)
-    # ResNet backbone
-    h = CondResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h, labels)
-    layer1 = CondResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h, labels)
-    h = CondResidualBlock(2 * nf,
-                          resample='down',
-                          act=act,
-                          normalization=normalizer)(layer1, labels)
-    layer2 = CondResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h, labels)
-    h = CondResidualBlock(2 * nf,
-                          resample='down',
-                          act=act,
-                          normalization=normalizer,
-                          dilation=2)(layer2, labels)
-    layer3 = CondResidualBlock(2 * nf,
-                               resample=None,
-                               act=act,
-                               normalization=normalizer,
-                               dilation=2)(h, labels)
-    h = CondResidualBlock(2 * nf,
-                          resample='down',
-                          act=act,
-                          normalization=normalizer,
-                          dilation=4)(layer3, labels)
-    layer4 = CondResidualBlock(2 * nf,
-                               resample=None,
-                               act=act,
-                               normalization=normalizer,
-                               dilation=4)(h, labels)
-    # U-Net with RefineBlocks
-    ref1 = CondRefineBlock(layer4.shape[1:3],
-                           2 * nf,
-                           act=act,
-                           normalizer=normalizer,
-                           interpolation=interpolation,
-                           start=True)([layer4], labels)
-    ref2 = CondRefineBlock(layer3.shape[1:3],
-                           2 * nf,
-                           normalizer=normalizer,
-                           interpolation=interpolation,
-                           act=act)([layer3, ref1], labels)
-    ref3 = CondRefineBlock(layer2.shape[1:3],
-                           2 * nf,
-                           normalizer=normalizer,
-                           interpolation=interpolation,
-                           act=act)([layer2, ref2], labels)
-    ref4 = CondRefineBlock(layer1.shape[1:3],
-                           nf,
-                           normalizer=normalizer,
-                           interpolation=interpolation,
-                           act=act,
-                           end=True)([layer1, ref3], labels)
+    output = self.begin_conv(h)
 
-    h = normalizer()(ref4, labels)
-    h = act(h)
-    h = conv3x3(h, x.shape[-1])
+    layer1 = self._compute_cond_module(self.res1, output, y)
+    layer2 = self._compute_cond_module(self.res2, layer1, y)
+    layer3 = self._compute_cond_module(self.res3, layer2, y)
+    layer4 = self._compute_cond_module(self.res4, layer3, y)
 
-    # When using the DDPM loss, no need of normalizing the output
-    if config.model.scale_by_sigma:
-      used_sigmas = sigmas[labels].reshape(
-        (x.shape[0], *([1] * len(x.shape[1:]))))
-      return h / used_sigmas
-    else:
-      return h
+    ref1 = self.refine1([layer4], y, layer4.shape[2:])
+    ref2 = self.refine2([layer3, ref1], y, layer3.shape[2:])
+    ref3 = self.refine3([layer2, ref2], y, layer2.shape[2:])
+    output = self.refine4([layer1, ref3], y, layer1.shape[2:])
+
+    output = self.normalizer(output, y)
+    output = self.act(output)
+    output = self.end_conv(output)
+
+    return output
 
 
 @register_model(name='ncsnv2_128')
-class NCSNv2_128(nn.Module):  # pylint: disable=invalid-name
+class NCSNv2_128(nn.Module):
   """NCSNv2 model architecture for 128px images."""
-  config: ml_collections.ConfigDict
+  def __init__(self, config):
+    super().__init__()
+    self.centered = config.data.centered
+    self.norm = get_normalization(config)
+    self.nf = nf = config.model.nf
+    self.act = act = get_act(config)
+    self.sigmas = get_sigmas(config)
+    self.config = config
 
-  @nn.compact
-  def __call__(self, x, labels, train=True):
-    # config parsing
-    config = self.config
-    nf = config.model.nf
-    act = get_act(config)
-    normalizer = get_normalization(config)
-    sigmas = get_sigmas(config)
-    interpolation = config.model.interpolation
+    self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
+    self.normalizer = self.norm(nf, config.model.num_scales)
 
-    if not config.data.centered:
+    self.end_conv = nn.Conv2d(nf, config.data.channels, 3, stride=1, padding=1)
+
+    self.res1 = nn.ModuleList([
+      ResidualBlock(self.nf, self.nf, resample=None, act=act,
+                    normalization=self.norm),
+      ResidualBlock(self.nf, self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res2 = nn.ModuleList([
+      ResidualBlock(self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res3 = nn.ModuleList([
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res4 = nn.ModuleList([
+      ResidualBlock(2 * self.nf, 4 * self.nf, resample='down', act=act,
+                    normalization=self.norm, dilation=2),
+      ResidualBlock(4 * self.nf, 4 * self.nf, resample=None, act=act,
+                    normalization=self.norm, dilation=2)]
+    )
+
+    self.res5 = nn.ModuleList([
+      ResidualBlock(4 * self.nf, 4 * self.nf, resample='down', act=act,
+                    normalization=self.norm, dilation=4),
+      ResidualBlock(4 * self.nf, 4 * self.nf, resample=None, act=act,
+                    normalization=self.norm, dilation=4)]
+    )
+
+    self.refine1 = RefineBlock([4 * self.nf], 4 * self.nf, act=act, start=True)
+    self.refine2 = RefineBlock([4 * self.nf, 4 * self.nf], 2 * self.nf, act=act)
+    self.refine3 = RefineBlock([2 * self.nf, 2 * self.nf], 2 * self.nf, act=act)
+    self.refine4 = RefineBlock([2 * self.nf, 2 * self.nf], self.nf, act=act)
+    self.refine5 = RefineBlock([self.nf, self.nf], self.nf, act=act, end=True)
+
+  def _compute_cond_module(self, module, x):
+    for m in module:
+      x = m(x)
+    return x
+
+  def forward(self, x, y):
+    if not self.centered:
       h = 2 * x - 1.
     else:
       h = x
 
-    h = conv3x3(h, nf, stride=1, bias=True)
-    # ResNet backbone
-    h = ResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h)
-    layer1 = ResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf, resample='down', act=act, normalization=normalizer)(layer1)
-    layer2 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf, resample='down', act=act, normalization=normalizer)(layer2)
-    layer3 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(4 * nf,
-                      resample='down',
-                      act=act,
-                      normalization=normalizer,
-                      dilation=2)(layer3)
-    layer4 = ResidualBlock(4 * nf, resample=None, act=act, normalization=normalizer, dilation=2)(h)
-    h = ResidualBlock(4 * nf,
-                      resample='down',
-                      act=act,
-                      normalization=normalizer,
-                      dilation=4)(layer4)
-    layer5 = ResidualBlock(4 * nf, resample=None, act=act, normalization=normalizer, dilation=4)(h)
-    # U-Net with RefineBlocks
-    ref1 = RefineBlock(layer5.shape[1:3],
-                       4 * nf,
-                       interpolation=interpolation,
-                       act=act,
-                       start=True)([layer5])
-    ref2 = RefineBlock(layer4.shape[1:3],
-                       2 * nf,
-                       interpolation=interpolation,
-                       act=act)([layer4, ref1])
-    ref3 = RefineBlock(layer3.shape[1:3],
-                       2 * nf,
-                       interpolation=interpolation,
-                       act=act)([layer3, ref2])
-    ref4 = RefineBlock(layer2.shape[1:3],
-                       nf,
-                       interpolation=interpolation,
-                       act=act)([layer2, ref3])
-    ref5 = RefineBlock(layer1.shape[1:3],
-                       nf,
-                       interpolation=interpolation,
-                       act=act,
-                       end=True)([layer1, ref4])
+    output = self.begin_conv(h)
 
-    h = normalizer()(ref5)
-    h = act(h)
-    h = conv3x3(h, x.shape[-1])
+    layer1 = self._compute_cond_module(self.res1, output)
+    layer2 = self._compute_cond_module(self.res2, layer1)
+    layer3 = self._compute_cond_module(self.res3, layer2)
+    layer4 = self._compute_cond_module(self.res4, layer3)
+    layer5 = self._compute_cond_module(self.res5, layer4)
 
-    if config.model.scale_by_sigma:
-      used_sigmas = sigmas[labels].reshape(
-        (x.shape[0], *([1] * len(x.shape[1:]))))
-      return h / used_sigmas
-    else:
-      return h
+    ref1 = self.refine1([layer5], layer5.shape[2:])
+    ref2 = self.refine2([layer4, ref1], layer4.shape[2:])
+    ref3 = self.refine3([layer3, ref2], layer3.shape[2:])
+    ref4 = self.refine4([layer2, ref3], layer2.shape[2:])
+    output = self.refine5([layer1, ref4], layer1.shape[2:])
+
+    output = self.normalizer(output)
+    output = self.act(output)
+    output = self.end_conv(output)
+
+    used_sigmas = self.sigmas[y].view(x.shape[0], *([1] * len(x.shape[1:])))
+
+    output = output / used_sigmas
+
+    return output
 
 
 @register_model(name='ncsnv2_256')
-class NCSNv2_256(nn.Module):  # pylint: disable=invalid-name
-  """NCSNv2 model architecture for 128px images."""
-  config: ml_collections.ConfigDict
+class NCSNv2_256(nn.Module):
+  """NCSNv2 model architecture for 256px images."""
+  def __init__(self, config):
+    super().__init__()
+    self.centered = config.data.centered
+    self.norm = get_normalization(config)
+    self.nf = nf = config.model.nf
+    self.act = act = get_act(config)
+    self.sigmas = get_sigmas(config)
+    self.config = config
 
-  @nn.compact
-  def __call__(self, x, labels, train=True):
-    # config parsing
-    config = self.config
-    nf = config.model.nf
-    act = get_act(config)
-    normalizer = get_normalization(config)
-    sigmas = get_sigmas(config)
-    interpolation = config.model.interpolation
+    self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
+    self.normalizer = self.norm(nf, config.model.num_scales)
 
-    if not config.data.centered:
+    self.end_conv = nn.Conv2d(nf, config.data.channels, 3, stride=1, padding=1)
+
+    self.res1 = nn.ModuleList([
+      ResidualBlock(self.nf, self.nf, resample=None, act=act,
+                    normalization=self.norm),
+      ResidualBlock(self.nf, self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res2 = nn.ModuleList([
+      ResidualBlock(self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res3 = nn.ModuleList([
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res31 = nn.ModuleList([
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample='down', act=act,
+                    normalization=self.norm),
+      ResidualBlock(2 * self.nf, 2 * self.nf, resample=None, act=act,
+                    normalization=self.norm)]
+    )
+
+    self.res4 = nn.ModuleList([
+      ResidualBlock(2 * self.nf, 4 * self.nf, resample='down', act=act,
+                    normalization=self.norm, dilation=2),
+      ResidualBlock(4 * self.nf, 4 * self.nf, resample=None, act=act,
+                    normalization=self.norm, dilation=2)]
+    )
+
+    self.res5 = nn.ModuleList([
+      ResidualBlock(4 * self.nf, 4 * self.nf, resample='down', act=act,
+                    normalization=self.norm, dilation=4),
+      ResidualBlock(4 * self.nf, 4 * self.nf, resample=None, act=act,
+                    normalization=self.norm, dilation=4)]
+    )
+
+    self.refine1 = RefineBlock([4 * self.nf], 4 * self.nf, act=act, start=True)
+    self.refine2 = RefineBlock([4 * self.nf, 4 * self.nf], 2 * self.nf, act=act)
+    self.refine3 = RefineBlock([2 * self.nf, 2 * self.nf], 2 * self.nf, act=act)
+    self.refine31 = RefineBlock([2 * self.nf, 2 * self.nf], 2 * self.nf, act=act)
+    self.refine4 = RefineBlock([2 * self.nf, 2 * self.nf], self.nf, act=act)
+    self.refine5 = RefineBlock([self.nf, self.nf], self.nf, act=act, end=True)
+
+  def _compute_cond_module(self, module, x):
+    for m in module:
+      x = m(x)
+    return x
+
+  def forward(self, x, y):
+    if not self.centered:
       h = 2 * x - 1.
     else:
       h = x
 
-    h = conv3x3(h, nf, stride=1, bias=True)
-    # ResNet backbone
-    h = ResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h)
-    layer1 = ResidualBlock(nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf, resample='down', act=act, normalization=normalizer)(layer1)
-    layer2 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf, resample='down', act=act, normalization=normalizer)(layer2)
-    layer3 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(2 * nf, resample='down', act=act, normalization=normalizer)(layer3)
-    layer31 = ResidualBlock(2 * nf, resample=None, act=act, normalization=normalizer)(h)
-    h = ResidualBlock(4 * nf,
-                      resample='down',
-                      act=act,
-                      normalization=normalizer,
-                      dilation=2)(layer31)
-    layer4 = ResidualBlock(4 * nf, resample=None, act=act, normalization=normalizer, dilation=2)(h)
-    h = ResidualBlock(4 * nf,
-                      resample='down',
-                      act=act,
-                      normalization=normalizer,
-                      dilation=4)(layer4)
-    layer5 = ResidualBlock(4 * nf, resample=None, act=act, normalization=normalizer, dilation=4)(h)
-    # U-Net with RefineBlocks
-    ref1 = RefineBlock(layer5.shape[1:3],
-                       4 * nf,
-                       interpolation=interpolation,
-                       act=act,
-                       start=True)([layer5])
-    ref2 = RefineBlock(layer4.shape[1:3],
-                       2 * nf,
-                       interpolation=interpolation,
-                       act=act)([layer4, ref1])
-    ref31 = RefineBlock(layer31.shape[1:3],
-                        2 * nf,
-                        interpolation=interpolation,
-                        act=act)([layer31, ref2])
-    ref3 = RefineBlock(layer3.shape[1:3],
-                       2 * nf,
-                       interpolation=interpolation,
-                       act=act)([layer3, ref31])
-    ref4 = RefineBlock(layer2.shape[1:3],
-                       nf,
-                       interpolation=interpolation,
-                       act=act)([layer2, ref3])
-    ref5 = RefineBlock(layer1.shape[1:3],
-                       nf,
-                       interpolation=interpolation,
-                       act=act,
-                       end=True)([layer1, ref4])
+    output = self.begin_conv(h)
 
-    h = normalizer()(ref5)
-    h = act(h)
-    h = conv3x3(h, x.shape[-1])
+    layer1 = self._compute_cond_module(self.res1, output)
+    layer2 = self._compute_cond_module(self.res2, layer1)
+    layer3 = self._compute_cond_module(self.res3, layer2)
+    layer31 = self._compute_cond_module(self.res31, layer3)
+    layer4 = self._compute_cond_module(self.res4, layer31)
+    layer5 = self._compute_cond_module(self.res5, layer4)
 
-    if config.model.scale_by_sigma:
-      used_sigmas = sigmas[labels].reshape(
-        (x.shape[0], *([1] * len(x.shape[1:]))))
-      return h / used_sigmas
-    else:
-      return h
+    ref1 = self.refine1([layer5], layer5.shape[2:])
+    ref2 = self.refine2([layer4, ref1], layer4.shape[2:])
+    ref31 = self.refine31([layer31, ref2], layer31.shape[2:])
+    ref3 = self.refine3([layer3, ref31], layer3.shape[2:])
+    ref4 = self.refine4([layer2, ref3], layer2.shape[2:])
+    output = self.refine5([layer1, ref4], layer1.shape[2:])
+
+    output = self.normalizer(output)
+    output = self.act(output)
+    output = self.end_conv(output)
+
+    used_sigmas = self.sigmas[y].view(x.shape[0], *([1] * len(x.shape[1:])))
+
+    output = output / used_sigmas
+
+    return output
