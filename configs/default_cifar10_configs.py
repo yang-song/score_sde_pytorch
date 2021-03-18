@@ -1,4 +1,5 @@
 import ml_collections
+import torch
 
 
 def get_default_configs():
@@ -16,7 +17,6 @@ def get_default_configs():
   training.snapshot_sampling = True
   training.likelihood_weighting = False
   training.continuous = True
-  training.n_jitted_steps = 5
   training.reduce_mean = False
 
   # sampling
@@ -67,5 +67,6 @@ def get_default_configs():
   optim.grad_clip = 1.
 
   config.seed = 42
+  config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
   return config

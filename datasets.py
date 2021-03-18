@@ -68,13 +68,11 @@ def central_crop(image, size):
   return tf.image.crop_to_bounding_box(image, top, left, size, size)
 
 
-def get_dataset(config, additional_dim=None, uniform_dequantization=False, evaluation=False):
+def get_dataset(config, uniform_dequantization=False, evaluation=False):
   """Create data loaders for training and evaluation.
 
   Args:
     config: A ml_collection.ConfigDict parsed from config files.
-    additional_dim: An integer or `None`. If present, add one additional dimension to the output data,
-      which equals the number of steps jitted together.
     uniform_dequantization: If `True`, add uniform dequantization to images.
     evaluation: If `True`, fix number of epochs to 1.
 
@@ -87,16 +85,10 @@ def get_dataset(config, additional_dim=None, uniform_dequantization=False, evalu
     raise ValueError(f'Batch sizes ({batch_size} must be divided by'
                      f'the number of devices ({jax.device_count()})')
 
-  per_device_batch_size = batch_size // jax.device_count()
   # Reduce this when image resolution is too large and data pointer is stored
   shuffle_buffer_size = 10000
   prefetch_size = tf.data.experimental.AUTOTUNE
   num_epochs = None if not evaluation else 1
-  # Create additional data dimension when jitting multiple steps together
-  if additional_dim is None:
-    batch_dims = [jax.local_device_count(), per_device_batch_size]
-  else:
-    batch_dims = [jax.local_device_count(), additional_dim, per_device_batch_size]
 
   # Create dataset builders for each dataset.
   if config.data.dataset == 'CIFAR10':
@@ -116,7 +108,6 @@ def get_dataset(config, additional_dim=None, uniform_dequantization=False, evalu
     def resize_op(img):
       img = tf.image.convert_image_dtype(img, tf.float32)
       return tf.image.resize(img, [config.data.image_size, config.data.image_size], antialias=True)
-
 
   elif config.data.dataset == 'CELEBA':
     dataset_builder = tfds.builder('celeb_a')
@@ -197,8 +188,7 @@ def get_dataset(config, additional_dim=None, uniform_dequantization=False, evalu
     ds = ds.repeat(count=num_epochs)
     ds = ds.shuffle(shuffle_buffer_size)
     ds = ds.map(preprocess_fn, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-    for batch_size in reversed(batch_dims):
-      ds = ds.batch(batch_size, drop_remainder=True)
+    ds = ds.batch(batch_size, drop_remainder=True)
     return ds.prefetch(prefetch_size)
 
   train_ds = create_dataset(dataset_builder, train_split_name)

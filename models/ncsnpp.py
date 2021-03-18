@@ -39,7 +39,7 @@ class NCSNpp(nn.Module):
     super().__init__()
     self.config = config
     self.act = act = get_act(config)
-    self.sigmas = utils.get_sigmas(config)
+    self.register_buffer('sigmas', torch.tensor(utils.get_sigmas(config)))
 
     self.nf = nf = config.model.nf
     ch_mult = config.model.ch_mult
@@ -98,8 +98,7 @@ class NCSNpp(nn.Module):
                                  with_conv=resamp_with_conv, fir=fir, fir_kernel=fir_kernel)
 
     if progressive == 'output_skip':
-      pyramid_upsample = functools.partial(layerspp.Upsample,
-                                           fir=fir, fir_kernel=fir_kernel, with_conv=False)
+      self.pyramid_upsample = layerspp.Upsample(fir=fir, fir_kernel=fir_kernel, with_conv=False)
     elif progressive == 'residual':
       pyramid_upsample = functools.partial(layerspp.Upsample,
                                            fir=fir, fir_kernel=fir_kernel, with_conv=True)
@@ -108,8 +107,7 @@ class NCSNpp(nn.Module):
                                    with_conv=resamp_with_conv, fir=fir, fir_kernel=fir_kernel)
 
     if progressive_input == 'input_skip':
-      pyramid_downsample = functools.partial(layerspp.Downsample,
-                                             fir=fir, fir_kernel=fir_kernel, with_conv=False)
+      self.pyramid_downsample = layerspp.Downsample(fir=fir, fir_kernel=fir_kernel, with_conv=False)
     elif progressive_input == 'residual':
       pyramid_downsample = functools.partial(layerspp.Downsample,
                                              fir=fir, fir_kernel=fir_kernel, with_conv=True)
@@ -163,7 +161,6 @@ class NCSNpp(nn.Module):
           modules.append(ResnetBlock(down=True, in_ch=in_ch))
 
         if progressive_input == 'input_skip':
-          modules.append(pyramid_downsample(in_ch=input_pyramid_ch))
           modules.append(combiner(dim1=input_pyramid_ch, dim2=in_ch))
           if combine_method == 'cat':
             in_ch *= 2
@@ -207,7 +204,6 @@ class NCSNpp(nn.Module):
             raise ValueError(f'{progressive} is not a valid name.')
         else:
           if progressive == 'output_skip':
-            modules.append(pyramid_upsample(in_ch=pyramid_ch))
             modules.append(nn.GroupNorm(num_groups=min(in_ch // 4, 32),
                                         num_channels=in_ch, eps=1e-6))
             modules.append(conv3x3(in_ch, channels, bias=True, init_scale=init_scale))
@@ -246,7 +242,7 @@ class NCSNpp(nn.Module):
     elif self.embedding_type == 'positional':
       # Sinusoidal positional embeddings.
       timesteps = time_cond
-      used_sigmas = self.sigmas[time_cond.int()]
+      used_sigmas = self.sigmas[time_cond.long()]
       temb = layers.get_timestep_embedding(timesteps, self.nf)
 
     else:
@@ -291,8 +287,7 @@ class NCSNpp(nn.Module):
           m_idx += 1
 
         if self.progressive_input == 'input_skip':
-          input_pyramid = modules[m_idx](input_pyramid)
-          m_idx += 1
+          input_pyramid = self.pyramid_downsample(input_pyramid)
           h = modules[m_idx](input_pyramid, h)
           m_idx += 1
 
@@ -343,8 +338,7 @@ class NCSNpp(nn.Module):
             raise ValueError(f'{self.progressive} is not a valid name.')
         else:
           if self.progressive == 'output_skip':
-            pyramid = modules[m_idx](pyramid)
-            m_idx += 1
+            pyramid = self.pyramid_upsample(pyramid)
             pyramid_h = self.act(modules[m_idx](h))
             m_idx += 1
             pyramid_h = modules[m_idx](pyramid_h)

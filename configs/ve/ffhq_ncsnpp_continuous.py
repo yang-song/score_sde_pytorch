@@ -14,10 +14,10 @@
 # limitations under the License.
 
 # Lint as: python3
-"""Training NCSN++ on CelebAHQ with VE SDE."""
+"""Training NCSN++ on FFHQ with VE SDEs."""
 
 import ml_collections
-
+import torch
 
 def get_config():
   config = ml_collections.ConfigDict()
@@ -33,8 +33,7 @@ def get_config():
   training.sde = 'vesde'
   training.continuous = True
   training.likelihood_weighting = False
-  training.n_jitted_steps = 1
-  training.reduce_mean = False
+  training.reduce_mean = True
 
   # sampling
   config.sampling = sampling = ml_collections.ConfigDict()
@@ -55,13 +54,14 @@ def get_config():
 
   # data
   config.data = data = ml_collections.ConfigDict()
-  data.dataset = 'CelebAHQ'
+  data.dataset = 'FFHQ'
   data.image_size = 1024
   data.centered = False
   data.random_flip = True
   data.uniform_dequantization = False
   data.num_channels = 3
-  data.tfrecords_path = '/atlas/u/yangsong/celeba_hq/-r10.tfrecords'
+  # Plug in your own path to the tfrecords file.
+  data.tfrecords_path = '/raid/song/ffhq-dataset/ffhq/ffhq-r10.tfrecords'
 
   # model
   config.model = model = ml_collections.ConfigDict()
@@ -105,5 +105,6 @@ def get_config():
   optim.grad_clip = 1.
 
   config.seed = 42
+  config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
   return config

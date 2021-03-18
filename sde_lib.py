@@ -1,9 +1,7 @@
 """Abstract SDE classes, Reverse SDE, and VE/VP SDEs."""
 import abc
-import jax.numpy as jnp
-import jax
+import torch
 import numpy as np
-from utils import batch_mul
 
 
 class SDE(abc.ABC):
@@ -34,7 +32,7 @@ class SDE(abc.ABC):
     pass
 
   @abc.abstractmethod
-  def prior_sampling(self, rng, shape):
+  def prior_sampling(self, shape):
     """Generate one sample from the prior distribution, $p_T(x)$."""
     pass
 
@@ -58,8 +56,8 @@ class SDE(abc.ABC):
     Defaults to Euler-Maruyama discretization.
 
     Args:
-      x: a JAX tensor.
-      t: a JAX float representing the time step (from 0 to `self.T`)
+      x: a torch tensor
+      t: a torch float representing the time step (from 0 to `self.T`)
 
     Returns:
       f, G
@@ -67,7 +65,7 @@ class SDE(abc.ABC):
     dt = 1 / self.N
     drift, diffusion = self.sde(x, t)
     f = drift * dt
-    G = diffusion * jnp.sqrt(dt)
+    G = diffusion * torch.sqrt(torch.tensor(dt, device=t.device))
     return f, G
 
   def reverse(self, score_fn, probability_flow=False):
@@ -96,7 +94,7 @@ class SDE(abc.ABC):
         """Create the drift and diffusion functions for the reverse SDE/ODE."""
         drift, diffusion = sde_fn(x, t)
         score = score_fn(x, t)
-        drift = drift - batch_mul(diffusion ** 2, score * (0.5 if self.probability_flow else 1.))
+        drift = drift - diffusion[:, None, None, None] ** 2 * score * (0.5 if self.probability_flow else 1.)
         # Set the diffusion function to zero for ODEs.
         diffusion = 0. if self.probability_flow else diffusion
         return drift, diffusion
@@ -104,8 +102,8 @@ class SDE(abc.ABC):
       def discretize(self, x, t):
         """Create discretized iteration rules for the reverse diffusion sampler."""
         f, G = discretize_fn(x, t)
-        rev_f = f - batch_mul(G ** 2, score_fn(x, t) * (0.5 if self.probability_flow else 1.))
-        rev_G = 0. if self.probability_flow else G
+        rev_f = f - G[:, None, None, None] ** 2 * score_fn(x, t) * (0.5 if self.probability_flow else 1.)
+        rev_G = torch.zeros_like(G) if self.probability_flow else G
         return rev_f, rev_G
 
     return RSDE()
@@ -124,11 +122,11 @@ class VPSDE(SDE):
     self.beta_0 = beta_min
     self.beta_1 = beta_max
     self.N = N
-    self.discrete_betas = jnp.linspace(beta_min / N, beta_max / N, N)
+    self.discrete_betas = torch.linspace(beta_min / N, beta_max / N, N)
     self.alphas = 1. - self.discrete_betas
-    self.alphas_cumprod = jnp.cumprod(self.alphas, axis=0)
-    self.sqrt_alphas_cumprod = jnp.sqrt(self.alphas_cumprod)
-    self.sqrt_1m_alphas_cumprod = jnp.sqrt(1. - self.alphas_cumprod)
+    self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+    self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+    self.sqrt_1m_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
 
   @property
   def T(self):
@@ -136,32 +134,32 @@ class VPSDE(SDE):
 
   def sde(self, x, t):
     beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
-    drift = -0.5 * batch_mul(beta_t, x)
-    diffusion = jnp.sqrt(beta_t)
+    drift = -0.5 * beta_t[:, None, None, None] * x
+    diffusion = torch.sqrt(beta_t)
     return drift, diffusion
 
   def marginal_prob(self, x, t):
     log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
-    mean = batch_mul(jnp.exp(log_mean_coeff), x)
-    std = jnp.sqrt(1 - jnp.exp(2. * log_mean_coeff))
+    mean = torch.exp(log_mean_coeff[:, None, None, None]) * x
+    std = torch.sqrt(1. - torch.exp(2. * log_mean_coeff))
     return mean, std
 
-  def prior_sampling(self, rng, shape):
-    return jax.random.normal(rng, shape)
+  def prior_sampling(self, shape):
+    return torch.randn(*shape)
 
   def prior_logp(self, z):
     shape = z.shape
     N = np.prod(shape[1:])
-    logp_fn = lambda z: -N / 2. * jnp.log(2 * np.pi) - jnp.sum(z ** 2) / 2.
-    return jax.vmap(logp_fn)(z)
+    logps = -N / 2. * np.log(2 * np.pi) - torch.sum(z ** 2, dim=(1, 2, 3)) / 2.
+    return logps
 
   def discretize(self, x, t):
     """DDPM discretization."""
-    timestep = (t * (self.N - 1) / self.T).astype(jnp.int32)
-    beta = self.discrete_betas[timestep]
-    alpha = self.alphas[timestep]
-    sqrt_beta = jnp.sqrt(beta)
-    f = batch_mul(jnp.sqrt(alpha), x) - x
+    timestep = (t * (self.N - 1) / self.T).long()
+    beta = self.discrete_betas.to(x.device)[timestep]
+    alpha = self.alphas.to(x.device)[timestep]
+    sqrt_beta = torch.sqrt(beta)
+    f = torch.sqrt(alpha)[:, None, None, None] * x - x
     G = sqrt_beta
     return f, G
 
@@ -186,25 +184,24 @@ class subVPSDE(SDE):
 
   def sde(self, x, t):
     beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
-    drift = -0.5 * batch_mul(beta_t, x)
-    discount = 1. - jnp.exp(-2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t ** 2)
-    diffusion = jnp.sqrt(beta_t * discount)
+    drift = -0.5 * beta_t[:, None, None, None] * x
+    discount = 1. - torch.exp(-2 * self.beta_0 * t - (self.beta_1 - self.beta_0) * t ** 2)
+    diffusion = torch.sqrt(beta_t * discount)
     return drift, diffusion
 
   def marginal_prob(self, x, t):
     log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
-    mean = batch_mul(jnp.exp(log_mean_coeff), x)
-    std = 1 - jnp.exp(2. * log_mean_coeff)
+    mean = torch.exp(log_mean_coeff)[:, None, None, None] * x
+    std = 1 - torch.exp(2. * log_mean_coeff)
     return mean, std
 
-  def prior_sampling(self, rng, shape):
-    return jax.random.normal(rng, shape)
+  def prior_sampling(self, shape):
+    return torch.randn(*shape)
 
   def prior_logp(self, z):
     shape = z.shape
     N = np.prod(shape[1:])
-    logp_fn = lambda z: -N / 2. * jnp.log(2 * np.pi) - jnp.sum(z ** 2) / 2.
-    return jax.vmap(logp_fn)(z)
+    return -N / 2. * np.log(2 * np.pi) - torch.sum(z ** 2, dim=(1, 2, 3)) / 2.
 
 
 class VESDE(SDE):
@@ -219,7 +216,7 @@ class VESDE(SDE):
     super().__init__(N)
     self.sigma_min = sigma_min
     self.sigma_max = sigma_max
-    self.discrete_sigmas = jnp.exp(np.linspace(np.log(self.sigma_min), np.log(self.sigma_max), N))
+    self.discrete_sigmas = torch.exp(torch.linspace(np.log(self.sigma_min), np.log(self.sigma_max), N))
     self.N = N
 
   @property
@@ -228,8 +225,9 @@ class VESDE(SDE):
 
   def sde(self, x, t):
     sigma = self.sigma_min * (self.sigma_max / self.sigma_min) ** t
-    drift = jnp.zeros_like(x)
-    diffusion = sigma * jnp.sqrt(2 * (jnp.log(self.sigma_max) - jnp.log(self.sigma_min)))
+    drift = torch.zeros_like(x)
+    diffusion = sigma * torch.sqrt(torch.tensor(2 * (np.log(self.sigma_max) - np.log(self.sigma_min)),
+                                                device=t.device))
     return drift, diffusion
 
   def marginal_prob(self, x, t):
@@ -237,20 +235,20 @@ class VESDE(SDE):
     mean = x
     return mean, std
 
-  def prior_sampling(self, rng, shape):
-    return jax.random.normal(rng, shape) * self.sigma_max
+  def prior_sampling(self, shape):
+    return torch.randn(*shape) * self.sigma_max
 
   def prior_logp(self, z):
     shape = z.shape
     N = np.prod(shape[1:])
-    logp_fn = lambda z: -N / 2. * jnp.log(2 * np.pi * self.sigma_max ** 2) - jnp.sum(z ** 2) / (2 * self.sigma_max ** 2)
-    return jax.vmap(logp_fn)(z)
+    return -N / 2. * np.log(2 * np.pi * self.sigma_max ** 2) - torch.sum(z ** 2, dim=(1, 2, 3)) / (2 * self.sigma_max ** 2)
 
   def discretize(self, x, t):
     """SMLD(NCSN) discretization."""
-    timestep = (t * (self.N - 1) / self.T).astype(jnp.int32)
-    sigma = self.discrete_sigmas[timestep]
-    adjacent_sigma = jnp.where(timestep == 0, jnp.zeros_like(timestep), self.discrete_sigmas[timestep - 1])
-    f = jnp.zeros_like(x)
-    G = jnp.sqrt(sigma ** 2 - adjacent_sigma ** 2)
+    timestep = (t * (self.N - 1) / self.T).long()
+    sigma = self.discrete_sigmas.to(t.device)[timestep]
+    adjacent_sigma = torch.where(timestep == 0, torch.zeros_like(t),
+                                 self.discrete_sigmas[timestep - 1].to(t.device))
+    f = torch.zeros_like(x)
+    G = torch.sqrt(sigma ** 2 - adjacent_sigma ** 2)
     return f, G

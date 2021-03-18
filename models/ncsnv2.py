@@ -15,7 +15,7 @@
 
 # pylint: skip-file
 """The NCSNv2 model."""
-
+import torch
 import torch.nn as nn
 import functools
 
@@ -49,7 +49,7 @@ class NCSNv2(nn.Module):
     self.nf = nf = config.model.nf
 
     self.act = act = get_act(config)
-    self.sigmas = get_sigmas(config)
+    self.register_buffer('sigmas', torch.tensor(get_sigmas(config)))
     self.config = config
 
     self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
@@ -227,7 +227,7 @@ class NCSNv2_128(nn.Module):
     self.norm = get_normalization(config)
     self.nf = nf = config.model.nf
     self.act = act = get_act(config)
-    self.sigmas = get_sigmas(config)
+    self.register_buffer('sigmas', torch.tensor(get_sigmas(config)))
     self.config = config
 
     self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)
@@ -321,7 +321,7 @@ class NCSNv2_256(nn.Module):
     self.norm = get_normalization(config)
     self.nf = nf = config.model.nf
     self.act = act = get_act(config)
-    self.sigmas = get_sigmas(config)
+    self.register_buffer('sigmas', torch.tensor(get_sigmas(config)))
     self.config = config
 
     self.begin_conv = nn.Conv2d(config.data.channels, nf, 3, stride=1, padding=1)

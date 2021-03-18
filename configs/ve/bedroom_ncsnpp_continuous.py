@@ -53,8 +53,8 @@ def get_config():
   model.fir_kernel = [1, 3, 3, 1]
   model.skip_rescale = True
   model.resblock_type = 'biggan'
-  model.progressive = 'residual'
-  model.progressive_input = 'residual'
+  model.progressive = 'output_skip'
+  model.progressive_input = 'input_skip'
   model.progressive_combine = 'sum'
   model.attention_type = 'ddpm'
   model.init_scale = 0.

@@ -16,20 +16,18 @@
 """All functions related to loss computation and optimization.
 """
 
-import flax
-import jax
-import jax.numpy as jnp
-import jax.random as random
+import torch
+import torch.optim as optim
+import numpy as np
 from models import utils as mutils
 from sde_lib import VESDE, VPSDE
-from utils import batch_mul
 
 
-def get_optimizer(config):
+def get_optimizer(config, params):
   """Returns a flax optimizer object based on `config`."""
   if config.optim.optimizer == 'Adam':
-    optimizer = flax.optim.Adam(beta1=config.optim.beta1, eps=config.optim.eps,
-                                weight_decay=config.optim.weight_decay)
+    optimizer = optim.Adam(params, lr=config.optim.lr, betas=(config.optim.beta1, 0.999), eps=config.optim.eps,
+                           weight_decay=config.optim.weight_decay)
   else:
     raise NotImplementedError(
       f'Optimizer {config.optim.optimizer} not supported yet!')
@@ -40,34 +38,25 @@ def get_optimizer(config):
 def optimization_manager(config):
   """Returns an optimize_fn based on `config`."""
 
-  def optimize_fn(state,
-                  grad,
+  def optimize_fn(optimizer, params, step, lr=config.optim.lr,
                   warmup=config.optim.warmup,
                   grad_clip=config.optim.grad_clip):
     """Optimizes with warmup and gradient clipping (disabled if negative)."""
-    lr = state.lr
     if warmup > 0:
-      lr = lr * jnp.minimum(state.step / warmup, 1.0)
+      for g in optimizer.param_groups:
+        g['lr'] = lr * np.minimum(step / warmup, 1.0)
     if grad_clip >= 0:
-      # Compute global gradient norm
-      grad_norm = jnp.sqrt(
-        sum([jnp.sum(jnp.square(x)) for x in jax.tree_leaves(grad)]))
-      # Clip gradient
-      clipped_grad = jax.tree_map(
-        lambda x: x * grad_clip / jnp.maximum(grad_norm, grad_clip), grad)
-    else:  # disabling gradient clipping if grad_clip < 0
-      clipped_grad = grad
-    return state.optimizer.apply_gradient(clipped_grad, learning_rate=lr)
+      torch.nn.utils.clip_grad_norm_(params, max_norm=grad_clip)
+    optimizer.step()
 
   return optimize_fn
 
 
-def get_sde_loss_fn(sde, model, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
+def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
   """Create a loss function for training with arbirary SDEs.
 
   Args:
     sde: An `sde_lib.SDE` object that represents the forward SDE.
-    model: A `flax.linen.Module` object that represents the architecture of the score-based model.
     train: `True` for training loss and `False` for evaluation loss.
     reduce_mean: If `True`, average the loss across data dimensions. Otherwise sum the loss across data dimensions.
     continuous: `True` indicates that the model is defined to take continuous time steps. Otherwise it requires
@@ -79,110 +68,91 @@ def get_sde_loss_fn(sde, model, train, reduce_mean=True, continuous=True, likeli
   Returns:
     A loss function.
   """
-  reduce_op = jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
+  reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
-  def loss_fn(rng, params, states, batch):
+  def loss_fn(model, batch):
     """Compute the loss function.
 
     Args:
-      rng: A JAX random state.
-      params: A dictionary that contains trainable parameters of the score-based model.
-      states: A dictionary that contains mutable states of the score-based model.
+      model: A score model.
       batch: A mini-batch of training data.
 
     Returns:
       loss: A scalar that represents the average loss value across the mini-batch.
-      new_model_state: A dictionary that contains the mutated states of the score-based model.
     """
-
-    score_fn = mutils.get_score_fn(sde, model, params, states, train=train, continuous=continuous, return_state=True)
-    data = batch['image']
-
-    rng, step_rng = random.split(rng)
-    t = random.uniform(step_rng, (data.shape[0],), minval=eps, maxval=sde.T)
-    rng, step_rng = random.split(rng)
-    z = random.normal(step_rng, data.shape)
-    mean, std = sde.marginal_prob(data, t)
-    perturbed_data = mean + batch_mul(std, z)
-    rng, step_rng = random.split(rng)
-    score, new_model_state = score_fn(perturbed_data, t, rng=step_rng)
+    score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
+    t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
+    z = torch.randn_like(batch)
+    mean, std = sde.marginal_prob(batch, t)
+    perturbed_data = mean + std[:, None, None, None] * z
+    score = score_fn(perturbed_data, t)
 
     if not likelihood_weighting:
-      losses = jnp.square(batch_mul(score, std) + z)
-      losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1)
+      losses = torch.square(score * std[:, None, None, None] + z)
+      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
     else:
-      g2 = sde.sde(jnp.zeros_like(data), t)[1] ** 2
-      losses = jnp.square(score + batch_mul(z, 1. / std))
-      losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1) * g2
+      g2 = sde.sde(torch.zeros_like(batch), t)[1] ** 2
+      losses = torch.square(score + z / std[:, None, None, None])
+      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
 
-    loss = jnp.mean(losses)
-    return loss, new_model_state
+    loss = torch.mean(losses)
+    return loss
 
   return loss_fn
 
 
-def get_smld_loss_fn(vesde, model, train, reduce_mean=False):
+def get_smld_loss_fn(vesde, train, reduce_mean=False):
   """Legacy code to reproduce previous results on SMLD(NCSN). Not recommended for new work."""
   assert isinstance(vesde, VESDE), "SMLD training only works for VESDEs."
 
   # Previous SMLD models assume descending sigmas
-  smld_sigma_array = vesde.discrete_sigmas[::-1]
-  reduce_op = jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
+  smld_sigma_array = torch.flip(vesde.discrete_sigmas, dims=(0,))
+  reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
-  def loss_fn(rng, params, states, batch):
-    model_fn = mutils.get_model_fn(model, params, states, train=train)
-    data = batch['image']
-    rng, step_rng = random.split(rng)
-    labels = random.choice(step_rng, vesde.N, shape=(data.shape[0],))
-    sigmas = smld_sigma_array[labels]
-    rng, step_rng = random.split(rng)
-    noise = batch_mul(random.normal(step_rng, data.shape), sigmas)
-    perturbed_data = noise + data
-    rng, step_rng = random.split(rng)
-    score, new_model_state = model_fn(perturbed_data, labels, rng=step_rng)
-    target = -batch_mul(noise, 1. / (sigmas ** 2))
-    losses = jnp.square(score - target)
-    losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1) * sigmas ** 2
-    loss = jnp.mean(losses)
-    return loss, new_model_state
+  def loss_fn(model, batch):
+    model_fn = mutils.get_model_fn(model, train=train)
+    labels = torch.randint(0, vesde.N, (batch.shape[0],), device=batch.device)
+    sigmas = smld_sigma_array.to(batch.device)[labels]
+    noise = torch.randn_like(batch) * sigmas[:, None, None, None]
+    perturbed_data = noise + batch
+    score = model_fn(perturbed_data, labels)
+    target = -noise / (sigmas ** 2)[:, None, None, None]
+    losses = torch.square(score - target)
+    losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * sigmas ** 2
+    loss = torch.mean(losses)
+    return loss
 
   return loss_fn
 
 
-def get_ddpm_loss_fn(vpsde, model, train, reduce_mean=True):
+def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
   """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
   assert isinstance(vpsde, VPSDE), "DDPM training only works for VPSDEs."
 
-  reduce_op = jnp.mean if reduce_mean else lambda *args, **kwargs: 0.5 * jnp.sum(*args, **kwargs)
+  reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
-  def loss_fn(rng, params, states, batch):
-    model_fn = mutils.get_model_fn(model, params, states, train=train)
-    data = batch['image']
-    rng, step_rng = random.split(rng)
-    labels = random.choice(step_rng, vpsde.N, shape=(data.shape[0],))
-    sqrt_alphas_cumprod = vpsde.sqrt_alphas_cumprod
-    sqrt_1m_alphas_cumprod = vpsde.sqrt_1m_alphas_cumprod
-    rng, step_rng = random.split(rng)
-    noise = random.normal(step_rng, data.shape)
-    perturbed_data = batch_mul(sqrt_alphas_cumprod[labels], data) + \
-                     batch_mul(sqrt_1m_alphas_cumprod[labels], noise)
-    rng, step_rng = random.split(rng)
-    score, new_model_state = model_fn(perturbed_data, labels, rng=step_rng)
-    losses = jnp.square(score - noise)
-    losses = reduce_op(losses.reshape((losses.shape[0], -1)), axis=-1)
-    loss = jnp.mean(losses)
-    return loss, new_model_state
+  def loss_fn(model, batch):
+    model_fn = mutils.get_model_fn(model, train=train)
+    labels = torch.randint(0, vpsde.N, (batch.shape[0],), device=batch.device)
+    sqrt_alphas_cumprod = vpsde.sqrt_alphas_cumprod.to(batch.device)
+    sqrt_1m_alphas_cumprod = vpsde.sqrt_1m_alphas_cumprod.to(batch.device)
+    noise = torch.randn_like(batch)
+    perturbed_data = sqrt_alphas_cumprod[labels, None, None, None] * batch + \
+                     sqrt_1m_alphas_cumprod[labels, None, None, None] * noise
+    score = model_fn(perturbed_data, labels)
+    losses = torch.square(score - noise)
+    losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
+    loss = torch.mean(losses)
+    return loss
 
   return loss_fn
 
 
-def get_step_fn(sde, model, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False):
+def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False):
   """Create a one-step training/evaluation function.
 
   Args:
     sde: An `sde_lib.SDE` object that represents the forward SDE.
-    model: A `flax.linen.Module` object that represents the architecture of the score-based model.
-    train: `True` for training and `False` for evaluation.
     optimize_fn: An optimization function.
     reduce_mean: If `True`, average the loss across data dimensions. Otherwise sum the loss across data dimensions.
     continuous: `True` indicates that the model is defined to take continuous time steps.
@@ -193,58 +163,48 @@ def get_step_fn(sde, model, train, optimize_fn=None, reduce_mean=False, continuo
     A one-step function for training or evaluation.
   """
   if continuous:
-    loss_fn = get_sde_loss_fn(sde, model, train, reduce_mean=reduce_mean,
+    loss_fn = get_sde_loss_fn(sde, train, reduce_mean=reduce_mean,
                               continuous=True, likelihood_weighting=likelihood_weighting)
   else:
     assert not likelihood_weighting, "Likelihood weighting is not supported for original SMLD/DDPM training."
     if isinstance(sde, VESDE):
-      loss_fn = get_smld_loss_fn(sde, model, train, reduce_mean=reduce_mean)
+      loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
     elif isinstance(sde, VPSDE):
-      loss_fn = get_ddpm_loss_fn(sde, model, train, reduce_mean=reduce_mean)
+      loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
-  def step_fn(carry_state, batch):
+  def step_fn(state, batch):
     """Running one step of training or evaluation.
 
     This function will undergo `jax.lax.scan` so that multiple steps can be pmapped and jit-compiled together
     for faster execution.
 
     Args:
-      carry_state: A tuple (JAX random state, `flax.struct.dataclass` containing the training state).
+      state: A dictionary of training information, containing the score model, optimizer,
+       EMA status, and number of optimization steps.
       batch: A mini-batch of training/evaluation data.
 
     Returns:
-      new_carry_state: The updated tuple of `carry_state`.
       loss: The average loss value of this state.
     """
-
-    (rng, state) = carry_state
-    rng, step_rng = jax.random.split(rng)
-    grad_fn = jax.value_and_grad(loss_fn, argnums=1, has_aux=True)
+    model = state['model']
     if train:
-      params = state.optimizer.target
-      states = state.model_state
-      (loss, new_model_state), grad = grad_fn(step_rng, params, states, batch)
-      grad = jax.lax.pmean(grad, axis_name='batch')
-      new_optimizer = optimize_fn(state, grad)
-      new_params_ema = jax.tree_multimap(
-        lambda p_ema, p: p_ema * state.ema_rate + p * (1. - state.ema_rate),
-        state.params_ema, new_optimizer.target
-      )
-      step = state.step + 1
-      new_state = state.replace(
-        step=step,
-        optimizer=new_optimizer,
-        model_state=new_model_state,
-        params_ema=new_params_ema
-      )
+      optimizer = state['optimizer']
+      optimizer.zero_grad()
+      loss = loss_fn(model, batch)
+      loss.backward()
+      optimize_fn(optimizer, model.parameters(), step=state['step'])
+      state['step'] += 1
+      state['ema'].update(model.parameters())
     else:
-      loss, _ = loss_fn(step_rng, state.params_ema, state.model_state, batch)
-      new_state = state
+      with torch.no_grad():
+        ema = state['ema']
+        ema.store(model.parameters())
+        ema.copy_to(model.parameters())
+        loss = loss_fn(model, batch)
+        ema.restore(model.parameters())
 
-    loss = jax.lax.pmean(loss, axis_name='batch')
-    new_carry_state = (rng, new_state)
-    return new_carry_state, loss
+    return loss
 
   return step_fn

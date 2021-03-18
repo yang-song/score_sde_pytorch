@@ -46,11 +46,11 @@ class Combine(nn.Module):
 
   def __init__(self, dim1, dim2, method='cat'):
     super().__init__()
-    self.Conv = conv1x1(dim1, dim2)
+    self.Conv_0 = conv1x1(dim1, dim2)
     self.method = method
 
   def forward(self, x, y):
-    h = self.Conv(x)
+    h = self.Conv_0(x)
     if self.method == 'cat':
       return torch.cat([h, y], dim=1)
     elif self.method == 'sum':
@@ -92,7 +92,7 @@ class AttnBlockpp(nn.Module):
 
 
 class Upsample(nn.Module):
-  def __init__(self, in_ch, out_ch=None, with_conv=False, fir=False,
+  def __init__(self, in_ch=None, out_ch=None, with_conv=False, fir=False,
                fir_kernel=(1, 3, 3, 1)):
     super().__init__()
     out_ch = out_ch if out_ch else in_ch
@@ -123,12 +123,11 @@ class Upsample(nn.Module):
       else:
         h = self.Conv2d_0(x)
 
-    assert h.shape == (B, self.out_ch, 2 * H, 2 * W)
     return h
 
 
 class Downsample(nn.Module):
-  def __init__(self, in_ch, out_ch=None, with_conv=False, fir=False,
+  def __init__(self, in_ch=None, out_ch=None, with_conv=False, fir=False,
                fir_kernel=(1, 3, 3, 1)):
     super().__init__()
     out_ch = out_ch if out_ch else in_ch
@@ -150,8 +149,8 @@ class Downsample(nn.Module):
   def forward(self, x):
     B, C, H, W = x.shape
     if not self.fir:
-      x = F.pad(x, (0, 1, 0, 1))
       if self.with_conv:
+        x = F.pad(x, (0, 1, 0, 1))
         x = self.Conv_0(x)
       else:
         x = F.avg_pool2d(x, 2, stride=2)
@@ -161,7 +160,6 @@ class Downsample(nn.Module):
       else:
         x = self.Conv2d_0(x)
 
-    assert x.shape == (B, self.out_ch, H // 2, W // 2)
     return x
 
 

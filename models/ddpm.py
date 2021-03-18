@@ -41,7 +41,7 @@ class DDPM(nn.Module):
   def __init__(self, config):
     super().__init__()
     self.act = act = get_act(config)
-    self.sigmas = utils.get_sigmas(config)
+    self.register_buffer('sigmas', torch.tensor(utils.get_sigmas(config)))
 
     self.nf = nf = config.model.nf
     ch_mult = config.model.ch_mult
@@ -52,21 +52,17 @@ class DDPM(nn.Module):
     self.num_resolutions = num_resolutions = len(ch_mult)
     self.all_resolutions = all_resolutions = [config.data.image_size // (2 ** i) for i in range(num_resolutions)]
 
-    modules = [nn.Linear(nf, nf * 4)]
-    modules[0].weight.data = default_initializer()(modules[0].weight.data.shape)
-    nn.init.zeros_(modules[0].bias)
-    modules.append(nn.Linear(nf * 4, nf * 4))
-    modules[1].weight.data = default_initializer()(modules[1].weight.data.shape)
-    nn.init.zeros_(modules[1].bias)
-
     AttnBlock = functools.partial(layers.AttnBlock)
     self.conditional = conditional = config.model.conditional
+    ResnetBlock = functools.partial(ResnetBlockDDPM, act=act, temb_dim=4 * nf, dropout=dropout)
     if conditional:
       # Condition on noise levels.
-      ResnetBlock = functools.partial(ResnetBlockDDPM, act=act, temb_dim=4 * nf, dropout=dropout)
-    else:
-      # Do not condition on noise levels explicitly, as in NCSNv2
-      ResnetBlock = functools.partial(ResnetBlockDDPM, act=act, temb_dim=4 * nf, dropout=dropout)
+      modules = [nn.Linear(nf, nf * 4)]
+      modules[0].weight.data = default_initializer()(modules[0].weight.data.shape)
+      nn.init.zeros_(modules[0].bias)
+      modules.append(nn.Linear(nf * 4, nf * 4))
+      modules[1].weight.data = default_initializer()(modules[1].weight.data.shape)
+      nn.init.zeros_(modules[1].bias)
 
     self.centered = config.data.centered
     channels = config.data.num_channels
@@ -114,13 +110,16 @@ class DDPM(nn.Module):
   def forward(self, x, labels):
     modules = self.all_modules
     m_idx = 0
-    # timestep/scale embedding
-    timesteps = labels
-    temb = layers.get_timestep_embedding(timesteps, self.nf)
-    temb = modules[m_idx](temb)
-    m_idx += 1
-    temb = modules[m_idx](self.act(temb))
-    m_idx += 1
+    if self.conditional:
+      # timestep/scale embedding
+      timesteps = labels
+      temb = layers.get_timestep_embedding(timesteps, self.nf)
+      temb = modules[m_idx](temb)
+      m_idx += 1
+      temb = modules[m_idx](self.act(temb))
+      m_idx += 1
+    else:
+      temb = None
 
     if self.centered:
       # Input is in [-1, 1]
