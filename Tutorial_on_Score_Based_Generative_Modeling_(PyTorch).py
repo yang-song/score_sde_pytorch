@@ -37,7 +37,7 @@ class Device(str, Enum):
   cpu = "cpu"
 
 
-def main(n_epochs: int = 10, device: Device = Device.cuda, batch_size: int = 32, lr: float = 1e-4, sampling_steps: int = 500, snr: float = 0.1, error_tolerance: float = 1e-5, sigma:float =  25.0):
+def main(n_epochs: int = 10, dataset_name: str = '2.2km-coarsened-2x_london_pr_random', device: Device = Device.cuda, batch_size: int = 32, lr: float = 1e-4, sampling_steps: int = 500, snr: float = 0.1, error_tolerance: float = 1e-5, sigma:float =  25.0):
   # device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
   # ## size of a mini-batch
   # batch_size =  32 #@param {'type':'integer'}
@@ -468,9 +468,14 @@ def main(n_epochs: int = 10, device: Device = Device.cuda, batch_size: int = 32,
                     device=device)
 
 
-  data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', '2.2km-coarsened-2x_london_pr_random')
-  xr_data = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, 28), grid_latitude=slice(0, 28))
+  data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', dataset_name)
 
+  xr_data = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0,28), grid_latitude=slice(0,28))
+
+  dataset = XRDataset(xr_data, ['target_pr'])
+  data_loader = DataLoader(dataset, batch_size=batch_size)
+
+  # xarray dataset to hold generated samples
   coords = {"sample_id": np.arange(64), "grid_longitude": xr_data.coords["grid_longitude"], "grid_latitude": xr_data.coords["grid_latitude"]}
   ds = xr.Dataset(data_vars={key: xr_data.data_vars[key] for key in ["grid_latitude_bnds", "grid_longitude_bnds", "rotated_latitude_longitude"]}, coords=coords, attrs={})
   ds['pr'] = xr.DataArray(samples.cpu().squeeze(1), dims=["sample_id", "grid_latitude", "grid_longitude"])
@@ -491,9 +496,7 @@ def main(n_epochs: int = 10, device: Device = Device.cuda, batch_size: int = 32,
 
   # Train model
 
-  xr_data = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0,28), grid_latitude=slice(0,28))
-  dataset = XRDataset(xr_data, ['target_pr'])
-  data_loader = DataLoader(dataset, batch_size=batch_size)
+
 
   # tqdm_epoch = tqdm.notebook.trange(n_epochs)
   tqdm_epoch = tqdm.trange(n_epochs)
