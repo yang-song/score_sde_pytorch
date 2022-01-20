@@ -24,18 +24,13 @@ import matplotlib.pyplot as plt
 from scipy import integrate
 from torchvision.utils import make_grid
 import seaborn as sns
-
-from ml_downscaling_emulator.utils import cp_model_rotated_pole
-
-
-
 from enum import Enum
 
+from ml_downscaling_emulator.utils import cp_model_rotated_pole
 
 class Device(str, Enum):
   cuda = "cuda"
   cpu = "cpu"
-
 
 def main(n_epochs: int = 10, dataset_name: str = '2.2km-coarsened-2x_london_pr_random', device: Device = Device.cuda, batch_size: int = 32, lr: float = 1e-4, sampling_steps: int = 500, snr: float = 0.1, error_tolerance: float = 1e-5, sigma:float =  25.0):
   # device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
@@ -451,7 +446,10 @@ def main(n_epochs: int = 10, dataset_name: str = '2.2km-coarsened-2x_london_pr_r
   marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
   diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
 
-  score_model = torch.nn.DataParallel(ScoreNet(marginal_prob_std=marginal_prob_std_fn))
+  score_model = ScoreNet(marginal_prob_std=marginal_prob_std_fn)
+  if device == "cuda":
+    typer.echo("DataParallelizing score_model...")
+    score_model = torch.nn.DataParallel(score_model)
   score_model = score_model.to(device)
 
   optimizer = Adam(score_model.parameters(), lr=lr)
@@ -522,7 +520,7 @@ def main(n_epochs: int = 10, dataset_name: str = '2.2km-coarsened-2x_london_pr_r
   #@title Sampling (double click to expand or collapse)
 
   ## Load the pre-trained checkpoint from disk.
-  device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
+  # device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
   ckpt = torch.load('ckpt.pth', map_location=device)
   score_model.load_state_dict(ckpt)
 
