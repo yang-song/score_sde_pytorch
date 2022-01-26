@@ -20,6 +20,26 @@ import tensorflow as tf
 import tensorflow_datasets as tfds
 
 
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+import xarray as xr
+
+class XRDataset(Dataset):
+    def __init__(self, ds, variables):
+        self.ds = ds
+        self.variables = variables
+
+    def __len__(self):
+        return len(self.ds.time)
+
+    def __getitem__(self, idx):
+        subds = self.ds.isel(time=idx)
+
+        X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0))
+        y = torch.tensor(np.stack([subds["target_pr"].values], axis=0))
+        return X, y
+
 def get_data_scaler(config):
   """Data normalizer. Assume data are always in [0, 1]."""
   if config.data.centered:
@@ -142,6 +162,18 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     dataset_builder = tf.data.TFRecordDataset(config.data.tfrecords_path)
     train_split_name = eval_split_name = 'train'
 
+
+  elif config.data.dataset == "XR":
+    import os
+    from torch.utils.data import DataLoader
+    data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', '2.2km-coarsened-2x_london_pr_random')
+    xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, 28),grid_latitude=slice(0, 28))
+    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, 28), grid_latitude=slice(0, 28))
+    train_dataset = XRDataset(xr_data_train, ['pr', 'target_pr'])
+    eval_dataset = XRDataset(xr_data_eval, ['pr', 'target_pr'])
+    train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
+    eval_data_loader = DataLoader(eval_dataset, batch_size=batch_size)
+    return train_data_loader, eval_data_loader, None
   else:
     raise NotImplementedError(
       f'Dataset {config.data.dataset} not yet supported.')
