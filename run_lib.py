@@ -148,7 +148,9 @@ def train(config, workdir):
       # Report the loss on an evaluation dataset periodically
       if step % config.training.eval_freq == 0:
         # eval_batch = torch.from_numpy(next(eval_iter)['image']._numpy()).to(config.device).float()
-        eval_batch, _ = next(eval_iter)
+        # TODO not quite a easy to repeatedly cycle through a PyTorch DataLoader compared to a TF dataset
+        # eval_batch, _ = next(eval_iter)
+        eval_batch = eval_ds[0]
         eval_batch = eval_batch.to(config.device)
         # eval_batch = eval_batch.permute(0, 3, 1, 2)
         eval_batch = scaler(eval_batch)
