@@ -123,54 +123,64 @@ def train(config, workdir):
   # In case there are multiple hosts (e.g., TPU pods), only log to host 0
   logging.info("Starting training loop at step %d." % (initial_step,))
 
-  for step in range(initial_step, num_train_steps + 1):
-    # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
-    batch = torch.from_numpy(next(train_iter)['image']._numpy()).to(config.device).float()
-    batch = batch.permute(0, 3, 1, 2)
-    batch = scaler(batch)
-    # Execute one training step
-    loss = train_step_fn(state, batch)
-    if step % config.training.log_freq == 0:
-      logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
-      writer.add_scalar("training_loss", loss, step)
 
-    # Save a temporary checkpoint to resume training after pre-emption periodically
-    if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
-      save_checkpoint(checkpoint_meta_dir, state)
+  import tqdm
+  # for step in range(initial_step, num_train_steps + 1):
+  tqdm_epoch = tqdm.trange(num_train_steps)
+  for epoch in tqdm_epoch:
+    for i, (batch, _) in enumerate(train_ds):
+      step = epoch * len(train_ds) + i
+      batch = batch.to(config.device)
+      # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
+      # batch = torch.from_numpy(next(train_iter)['image']._numpy()).to(config.device).float()
+      # batch = batch.permute(0, 3, 1, 2)
+      batch = scaler(batch)
+      # Execute one training step
+      loss = train_step_fn(state, batch)
+      if step % config.training.log_freq == 0:
+        logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
+        writer.add_scalar("training_loss", loss, step)
 
-    # Report the loss on an evaluation dataset periodically
-    if step % config.training.eval_freq == 0:
-      eval_batch = torch.from_numpy(next(eval_iter)['image']._numpy()).to(config.device).float()
-      eval_batch = eval_batch.permute(0, 3, 1, 2)
-      eval_batch = scaler(eval_batch)
-      eval_loss = eval_step_fn(state, eval_batch)
-      logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
-      writer.add_scalar("eval_loss", eval_loss.item(), step)
+      # Save a temporary checkpoint to resume training after pre-emption periodically
+      if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
+        save_checkpoint(checkpoint_meta_dir, state)
 
-    # Save a checkpoint periodically and generate samples if needed
-    if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
-      # Save the checkpoint.
-      save_step = step // config.training.snapshot_freq
-      save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.pth'), state)
+      # Report the loss on an evaluation dataset periodically
+      if step % config.training.eval_freq == 0:
+        # eval_batch = torch.from_numpy(next(eval_iter)['image']._numpy()).to(config.device).float()
+        eval_batch, _ = next(eval_iter)
+        eval_batch = eval_batch.to(config.device)
+        # eval_batch = eval_batch.permute(0, 3, 1, 2)
+        eval_batch = scaler(eval_batch)
+        eval_loss = eval_step_fn(state, eval_batch)
+        logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
+        writer.add_scalar("eval_loss", eval_loss.item(), step)
 
-      # Generate and save samples
-      if config.training.snapshot_sampling:
-        ema.store(score_model.parameters())
-        ema.copy_to(score_model.parameters())
-        sample, n = sampling_fn(score_model)
-        ema.restore(score_model.parameters())
-        this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
-        tf.io.gfile.makedirs(this_sample_dir)
-        nrow = int(np.sqrt(sample.shape[0]))
-        image_grid = make_grid(sample, nrow, padding=2)
-        sample = np.clip(sample.permute(0, 2, 3, 1).cpu().numpy() * 255, 0, 255).astype(np.uint8)
-        with tf.io.gfile.GFile(
-            os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
-          np.save(fout, sample)
+      # Save a checkpoint periodically and generate samples if needed
+      if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
+        # Save the checkpoint.
+        save_step = step // config.training.snapshot_freq
+        save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.pth'), state)
 
-        with tf.io.gfile.GFile(
-            os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
-          save_image(image_grid, fout)
+        # Generate and save samples
+        # TODO: This won't work for my data, which is pretty major as sampling is super important!
+        # if config.training.snapshot_sampling:
+        #   ema.store(score_model.parameters())
+        #   ema.copy_to(score_model.parameters())
+        #   sample, n = sampling_fn(score_model)
+        #   ema.restore(score_model.parameters())
+        #   this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
+        #   tf.io.gfile.makedirs(this_sample_dir)
+        #   nrow = int(np.sqrt(sample.shape[0]))
+        #   image_grid = make_grid(sample, nrow, padding=2)
+        #   sample = np.clip(sample.permute(0, 2, 3, 1).cpu().numpy() * 255, 0, 255).astype(np.uint8)
+        #   with tf.io.gfile.GFile(
+        #       os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
+        #     np.save(fout, sample)
+
+        #   with tf.io.gfile.GFile(
+        #       os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
+        #     save_image(image_grid, fout)
 
 
 def evaluate(config,
