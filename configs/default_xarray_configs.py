@@ -40,7 +40,7 @@ def get_default_configs():
   # data
   config.data = data = ml_collections.ConfigDict()
   data.dataset = 'XR'
-  data.image_size = 32
+  data.image_size = 28
   data.random_flip = False
   data.centered = True
   data.uniform_dequantization = False
