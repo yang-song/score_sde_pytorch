@@ -42,6 +42,10 @@ from torch.utils import tensorboard
 from torchvision.utils import make_grid, save_image
 from utils import save_checkpoint, restore_checkpoint
 
+from ml_downscaling_emulator.utils import cp_model_rotated_pole
+import matplotlib.pyplot as plt
+import xarray as xr
+
 FLAGS = flags.FLAGS
 
 
@@ -173,15 +177,31 @@ def train(config, workdir):
         this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
         tf.io.gfile.makedirs(this_sample_dir)
         nrow = int(np.sqrt(sample.shape[0]))
-        image_grid = make_grid(sample, nrow, padding=2)
-        sample = np.clip(sample.permute(0, 2, 3, 1).cpu().numpy() * 255, 0, 255).astype(np.uint8)
-        with tf.io.gfile.GFile(
-            os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
-          np.save(fout, sample)
 
-        with tf.io.gfile.GFile(
-            os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
-          save_image(image_grid, fout)
+        xr_data = train_ds.dataset.ds
+        coords = {"sample_id": np.arange(sample.shape[0]), "grid_longitude": xr_data.coords["grid_longitude"], "grid_latitude": xr_data.coords["grid_latitude"]}
+        dims=["sample_id", "grid_latitude", "grid_longitude"]
+        ds = xr.Dataset(data_vars={key: xr_data.data_vars[key] for key in ["grid_latitude_bnds", "grid_longitude_bnds", "rotated_latitude_longitude"]}, coords=coords, attrs={})
+        ds['pr'] = xr.DataArray(sample.cpu()[:,0].squeeze(1), dims=dims)
+        ds['target_pr'] = xr.DataArray(sample.cpu()[:,1].squeeze(1), dims=dims)
+
+        for var in ["pr", "target_pr"]:
+          fig, axes = plt.subplots(nrow, nrow, figsize=(24,24), subplot_kw={'projection': cp_model_rotated_pole})
+          for isample in range(sample.shape[0]):
+              ax = axes[isample // nrow][isample % nrow]
+              ax.coastlines()
+              ds[var].isel(sample_id=isample).plot(ax=ax)#, vmin=0.0)#, vmax=ds['pr'].max().values)#, vmin=0)
+              ax.set_title("")
+
+          with tf.io.gfile.GFile(os.path.join(this_sample_dir, f"sample_{var}.png"), "wb") as fout:
+            plt.savefig(fout)
+
+        with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
+          np.save(fout, sample.cpu().numpy())
+
+        # image_grid = make_grid(sample, nrow, padding=2)
+        # with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
+        #   save_image(image_grid, fout)
 
 
 def evaluate(config,
