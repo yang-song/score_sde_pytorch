@@ -42,7 +42,7 @@ def get_default_configs():
   data.dataset = 'XR'
   data.image_size = 32
   data.random_flip = False
-  data.centered = True
+  data.centered = False
   data.uniform_dequantization = False
   data.num_channels = 2
 
