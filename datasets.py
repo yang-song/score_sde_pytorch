@@ -36,10 +36,10 @@ class XRDataset(Dataset):
     def __getitem__(self, idx):
         subds = self.ds.isel(time=idx)
 
-        # X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
-        # y = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
-        X = torch.tensor(np.stack([(subds[var]/subds[var].max()).values for var in self.variables], axis=0)).float()
-        y = torch.tensor(np.stack([(subds["target_pr"]/subds["target_pr"].max()).values], axis=0)).float()
+        X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
+        y = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
+        # X = torch.tensor(np.stack([(subds[var]/subds[var].max()).values for var in self.variables], axis=0)).float()
+        # y = torch.tensor(np.stack([(subds["target_pr"]/subds["target_pr"].max()).values], axis=0)).float()
 
         return X, y
 
