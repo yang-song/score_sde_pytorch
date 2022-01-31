@@ -28,6 +28,7 @@ import logging
 # Keep the import below for registering all model definitions
 # from models import ddpm, ncsnv2, ncsnpp
 from models import unet
+from models import ncsnpp
 import losses
 import sampling
 from models import utils as mutils

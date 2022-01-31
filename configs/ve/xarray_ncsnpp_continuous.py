@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # Lint as: python3
-"""Training UNet on XArray with VE SDE."""
+"""Training NCSN++ on precip data with VE SDE."""
 from configs.default_xarray_configs import get_default_configs
 
 
@@ -31,13 +31,9 @@ def get_config():
   sampling.predictor = 'reverse_diffusion'
   sampling.corrector = 'langevin'
 
-  # data
-  data = config.data
-  data.image_size = 28 # u-net architechture currently designed to work with 28x28 images
-
   # model
   model = config.model
-  model.name = 'unet'
+  model.name = 'ncsnpp'
   model.scale_by_sigma = True
   model.ema_rate = 0.999
   model.normalization = 'GroupNorm'

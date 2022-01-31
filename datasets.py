@@ -36,8 +36,11 @@ class XRDataset(Dataset):
     def __getitem__(self, idx):
         subds = self.ds.isel(time=idx)
 
-        X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0))
-        y = torch.tensor(np.stack([subds["target_pr"].values], axis=0))
+        # X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
+        # y = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
+        X = torch.tensor(np.stack([(subds[var]/subds[var].max()).values for var in self.variables], axis=0)).float()
+        y = torch.tensor(np.stack([(subds["target_pr"]/subds["target_pr"].max()).values], axis=0)).float()
+
         return X, y
 
 def get_data_scaler(config):
@@ -167,8 +170,8 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     import os
     from torch.utils.data import DataLoader
     data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', '2.2km-coarsened-2x_london_pr_random')
-    xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, 28),grid_latitude=slice(0, 28))
-    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, 28), grid_latitude=slice(0, 28))
+    xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
+    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, config.data.image_size), grid_latitude=slice(0, config.data.image_size))
     train_dataset = XRDataset(xr_data_train, ['pr', 'target_pr'])
     eval_dataset = XRDataset(xr_data_eval, ['pr', 'target_pr'])
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
