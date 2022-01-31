@@ -123,13 +123,12 @@ def train(config, workdir):
   # In case there are multiple hosts (e.g., TPU pods), only log to host 0
   logging.info("Starting training loop at step %d." % (initial_step,))
 
-  loader = iter(train_ds)
   for step in range(initial_step, num_train_steps + 1):
     try:
-      batch, _ = loader.next()
+      batch, _ = train_iter.next()
     except StopIteration:
-      loader = iter(train_ds)
-      batch, _ = loader.next()
+      train_iter = iter(train_ds)
+      batch, _ = train_iter.next()
 
     batch = batch.to(config.device)
     # Convert data to JAX arrays and normalize them. Use ._numpy() to avoid copy.
