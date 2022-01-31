@@ -38,8 +38,6 @@ class XRDataset(Dataset):
 
         X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
         y = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
-        # X = torch.tensor(np.stack([(subds[var]/subds[var].max()).values for var in self.variables], axis=0)).float()
-        # y = torch.tensor(np.stack([(subds["target_pr"]/subds["target_pr"].max()).values], axis=0)).float()
 
         return X, y
 
@@ -172,6 +170,11 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', '2.2km-coarsened-2x_london_pr_random')
     xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
     xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, config.data.image_size), grid_latitude=slice(0, config.data.image_size))
+    xr_data_train["pr"] = xr_data_train["pr"]/xr_data_train["pr"].max()
+    xr_data_train["target_pr"] = xr_data_train["target_pr"]/xr_data_train["target_pr"].max()
+    xr_data_eval["pr"] = xr_data_eval["pr"]/xr_data_train["pr"].max()
+    xr_data_eval["target_pr"] = xr_data_eval["target_pr"]/xr_data_train["target_pr"].max()
+
     train_dataset = XRDataset(xr_data_train, ['pr', 'target_pr'])
     eval_dataset = XRDataset(xr_data_eval, ['pr', 'target_pr'])
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
