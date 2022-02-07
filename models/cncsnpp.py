@@ -227,7 +227,8 @@ class cNCSNpp(nn.Module):
                                   num_channels=in_ch, eps=1e-6))
       modules.append(conv3x3(in_ch, channels, init_scale=init_scale))
 
-    modules.append(ResnetBlock(in_ch=in_ch, out_ch=config.data.num_channels))
+
+    modules.append(conv3x3(in_ch, config.data.num_channels, init_scale=init_scale))
 
     self.all_modules = nn.ModuleList(modules)
 
