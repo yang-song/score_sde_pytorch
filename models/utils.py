@@ -105,11 +105,12 @@ def get_model_fn(model, train=False):
     A model function.
   """
 
-  def model_fn(x, labels):
+  def model_fn(x, cond, labels):
     """Compute the output of the score-based model.
 
     Args:
-      x: A mini-batch of input data.
+      x: A mini-batch of training/evaluation data to model.
+      cond: A mini-batch of conditioning inputs.
       labels: A mini-batch of conditioning variables for time steps. Should be interpreted differently
         for different models.
 
@@ -118,10 +119,10 @@ def get_model_fn(model, train=False):
     """
     if not train:
       model.eval()
-      return model(x, labels)
+      return model(x, cond, labels)
     else:
       model.train()
-      return model(x, labels)
+      return model(x, cond, labels)
 
   return model_fn
 
@@ -141,14 +142,14 @@ def get_score_fn(sde, model, train=False, continuous=False):
   model_fn = get_model_fn(model, train=train)
 
   if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
-    def score_fn(x, t):
+    def score_fn(x, cond, t):
       # Scale neural network output by standard deviation and flip sign
       if continuous or isinstance(sde, sde_lib.subVPSDE):
         # For VP-trained models, t=0 corresponds to the lowest noise level
         # The maximum value of time embedding is assumed to 999 for
         # continuously-trained models.
         labels = t * 999
-        score = model_fn(x, labels)
+        score = model_fn(x, cond, labels)
         std = sde.marginal_prob(torch.zeros_like(x), t)[1]
       else:
         # For VP-trained models, t=0 corresponds to the lowest noise level
@@ -160,7 +161,7 @@ def get_score_fn(sde, model, train=False, continuous=False):
       return score
 
   elif isinstance(sde, sde_lib.VESDE):
-    def score_fn(x, t):
+    def score_fn(x, cond, t):
       if continuous:
         labels = sde.marginal_prob(torch.zeros_like(x), t)[1]
       else:
@@ -169,7 +170,7 @@ def get_score_fn(sde, model, train=False, continuous=False):
         labels *= sde.N - 1
         labels = torch.round(labels).long()
 
-      score = model_fn(x, labels)
+      score = model_fn(x, cond, labels)
       return score
 
   else:

@@ -70,12 +70,13 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
   """
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
-  def loss_fn(model, batch):
+  def loss_fn(model, batch, cond):
     """Compute the loss function.
 
     Args:
       model: A score model.
-      batch: A mini-batch of training data.
+      batch: A mini-batch of training/evaluation data to model.
+      cond: A mini-batch of conditioning inputs.
 
     Returns:
       loss: A scalar that represents the average loss value across the mini-batch.
@@ -85,7 +86,7 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
     z = torch.randn_like(batch)
     mean, std = sde.marginal_prob(batch, t)
     perturbed_data = mean + std[:, None, None, None] * z
-    score = score_fn(perturbed_data, t)
+    score = score_fn(perturbed_data, cond, t)
 
     if not likelihood_weighting:
       losses = torch.square(score * std[:, None, None, None] + z)
@@ -174,7 +175,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
-  def step_fn(state, batch):
+  def step_fn(state, batch, cond):
     """Running one step of training or evaluation.
 
     This function will undergo `jax.lax.scan` so that multiple steps can be pmapped and jit-compiled together
@@ -183,7 +184,8 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     Args:
       state: A dictionary of training information, containing the score model, optimizer,
        EMA status, and number of optimization steps.
-      batch: A mini-batch of training/evaluation data.
+      batch: A mini-batch of training/evaluation data to model.
+      cond: A mini-batch of conditioning inputs.
 
     Returns:
       loss: The average loss value of this state.
@@ -192,7 +194,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     if train:
       optimizer = state['optimizer']
       optimizer.zero_grad()
-      loss = loss_fn(model, batch)
+      loss = loss_fn(model, batch, cond)
       loss.backward()
       optimize_fn(optimizer, model.parameters(), step=state['step'])
       state['step'] += 1
@@ -202,7 +204,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
         ema = state['ema']
         ema.store(model.parameters())
         ema.copy_to(model.parameters())
-        loss = loss_fn(model, batch)
+        loss = loss_fn(model, batch, cond)
         ema.restore(model.parameters())
 
     return loss
