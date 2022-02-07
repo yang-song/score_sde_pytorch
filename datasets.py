@@ -175,8 +175,8 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     xr_data_eval["pr"] = xr_data_eval["pr"]/xr_data_train["pr"].max()
     xr_data_eval["target_pr"] = xr_data_eval["target_pr"]/xr_data_train["target_pr"].max()
 
-    train_dataset = XRDataset(xr_data_train, ['pr', 'target_pr'])
-    eval_dataset = XRDataset(xr_data_eval, ['pr', 'target_pr'])
+    train_dataset = XRDataset(xr_data_train, ['pr'])
+    eval_dataset = XRDataset(xr_data_eval, ['pr'])
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
     eval_data_loader = DataLoader(eval_dataset, batch_size=batch_size)
     return train_data_loader, eval_data_loader, None
