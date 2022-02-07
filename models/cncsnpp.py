@@ -378,12 +378,8 @@ class cNCSNpp(nn.Module):
       h = modules[m_idx](h)
       m_idx += 1
 
-    if self.resblock_type == 'ddpm':
-      h = modules[m_idx](h)
-      m_idx += 1
-    else:
-      h = modules[m_idx](h, temb)
-      m_idx += 1
+    h = modules[m_idx](h)
+    m_idx += 1
 
     assert m_idx == len(modules)
     if self.config.model.scale_by_sigma:
