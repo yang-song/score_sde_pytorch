@@ -191,10 +191,9 @@ def train(config, workdir):
         coords = {"sample_id": np.arange(sample.shape[0]), "grid_longitude": xr_data.coords["grid_longitude"], "grid_latitude": xr_data.coords["grid_latitude"]}
         dims=["sample_id", "grid_latitude", "grid_longitude"]
         ds = xr.Dataset(data_vars={key: xr_data.data_vars[key] for key in ["grid_latitude_bnds", "grid_longitude_bnds", "rotated_latitude_longitude"]}, coords=coords, attrs={})
-        ds['pr'] = xr.DataArray(sample.cpu()[:,0].squeeze(1), dims=dims)
-        ds['target_pr'] = xr.DataArray(sample.cpu()[:,1].squeeze(1), dims=dims)
+        ds['target_pr'] = xr.DataArray(sample.cpu()[:,0].squeeze(1), dims=dims)
 
-        for var in ["pr", "target_pr"]:
+        for var in ["target_pr"]:
           fig, axes = plt.subplots(nrow, nrow, figsize=(24,24), subplot_kw={'projection': cp_model_rotated_pole})
           for isample in range(sample.shape[0]):
               ax = axes[isample // nrow][isample % nrow]
