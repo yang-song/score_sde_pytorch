@@ -18,6 +18,7 @@
 
 import gc
 import io
+import math
 import os
 import time
 
@@ -185,7 +186,7 @@ def train(config, workdir):
         ema.restore(score_model.parameters())
         this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
         tf.io.gfile.makedirs(this_sample_dir)
-        nrow = int(np.sqrt(sample.shape[0]))
+        nrow = math.ceil(np.sqrt(sample.shape[0]))
 
         xr_data = train_ds.dataset.ds
         coords = {"sample_id": np.arange(sample.shape[0]), "grid_longitude": xr_data.coords["grid_longitude"], "grid_latitude": xr_data.coords["grid_latitude"]}
