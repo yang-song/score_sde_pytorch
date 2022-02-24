@@ -173,14 +173,15 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
 
     norm_factors = {}
 
-    for var in ["pr"] + ["target_pr"]:
+    variables = config.data.dataset_name.split("_")[2].split("-")
+    for var in variables + ["target_pr"]:
       norm_factors[var] = xr_data_train[var].max().values
 
       xr_data_train[var] = xr_data_train[var]/norm_factors[var]
       xr_data_eval[var] = xr_data_eval[var]/norm_factors[var]
 
-    train_dataset = XRDataset(xr_data_train, ['pr'])
-    eval_dataset = XRDataset(xr_data_eval, ['pr'])
+    train_dataset = XRDataset(xr_data_train, variables)
+    eval_dataset = XRDataset(xr_data_eval, variables)
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
     eval_data_loader = DataLoader(eval_dataset, batch_size=batch_size)
     return train_data_loader, eval_data_loader, None
