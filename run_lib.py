@@ -159,14 +159,21 @@ def train(config, workdir):
       # eval_batch = torch.from_numpy(next(eval_iter)['image']._numpy()).to(config.device).float()
       # TODO not quite a easy to repeatedly cycle through a PyTorch DataLoader compared to a TF dataset
       # eval_batch, _ = next(eval_iter)
-      eval_cond_batch, eval_x_batch = next(iter(eval_ds))
-      eval_x_batch = eval_x_batch.to(config.device)
-      eval_cond_batch = eval_cond_batch.to(config.device)
-      # eval_batch = eval_batch.permute(0, 3, 1, 2)
-      eval_x_batch = scaler(eval_x_batch)
-      eval_loss = eval_step_fn(state, eval_x_batch, eval_cond_batch)
-      logging.info("step: %d, eval_loss: %.5e" % (step, eval_loss.item()))
-      writer.add_scalar("eval_loss", eval_loss.item(), step)
+      val_set_loss = 0.0
+      for eval_cond_batch, eval_x_batch in eval_ds:
+        # eval_cond_batch, eval_x_batch = next(iter(eval_ds))
+        eval_x_batch = eval_x_batch.to(config.device)
+        eval_cond_batch = eval_cond_batch.to(config.device)
+        # eval_batch = eval_batch.permute(0, 3, 1, 2)
+        eval_x_batch = scaler(eval_x_batch)
+        eval_loss = eval_step_fn(state, eval_x_batch, eval_cond_batch)
+
+        # Progress
+        val_set_loss += eval_loss.item()
+        val_set_loss = val_set_loss/len(eval_ds)
+
+      logging.info("step: %d, eval_loss: %.5e" % (step, val_set_loss))
+      writer.add_scalar("eval_loss", val_set_loss, step)
 
     # Save a checkpoint periodically and generate samples if needed
     if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
