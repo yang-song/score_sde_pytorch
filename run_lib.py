@@ -186,7 +186,7 @@ def train(config, workdir):
         ema.store(score_model.parameters())
         ema.copy_to(score_model.parameters())
 
-        eval_cond_batch, _ = next(iter(eval_ds))
+        eval_cond_batch, eval_x_batch = next(iter(eval_ds))
         eval_cond_batch = eval_cond_batch.to(config.device)
 
         sample, n = sampling_fn(score_model, eval_cond_batch)
@@ -199,20 +199,20 @@ def train(config, workdir):
         coords = {"sample_id": np.arange(sample.shape[0]), "grid_longitude": xr_data.coords["grid_longitude"], "grid_latitude": xr_data.coords["grid_latitude"]}
         dims=["sample_id", "grid_latitude", "grid_longitude"]
         ds = xr.Dataset(data_vars={key: xr_data.data_vars[key] for key in ["grid_latitude_bnds", "grid_longitude_bnds", "rotated_latitude_longitude"]}, coords=coords, attrs={})
-        ds['target_pr'] = xr.DataArray(sample.cpu()[:,0].squeeze(1), dims=dims)
-        ds['pr'] = xr.DataArray(eval_cond_batch.cpu()[:,0].squeeze(1), dims=dims)
+        ds['pred_pr'] = xr.DataArray(sample.cpu()[:,0].squeeze(1), dims=dims)
+        ds['target_pr'] = xr.DataArray(eval_x_batch.cpu()[:,0].squeeze(1), dims=dims)
 
         fig, axes = plt.subplots(nrow*2, nrow, figsize=(24,24), subplot_kw={'projection': cp_model_rotated_pole})
         for isample in range(sample.shape[0]):
             ax = axes[(isample // nrow)*2][isample % nrow]
             ax.coastlines()
-            ds["pr"].isel(sample_id=isample).plot(ax=ax)
-            ax.set_title("")
+            ds["pred_pr"].isel(sample_id=isample).plot(ax=ax)
+            ax.set_title("Cond generated pr")
 
             ax = axes[(isample // nrow)*2+1][isample % nrow]
             ax.coastlines()
             ds["target_pr"].isel(sample_id=isample).plot(ax=ax)
-            ax.set_title("")
+            ax.set_title("Target pr")
 
         with tf.io.gfile.GFile(os.path.join(this_sample_dir, f"sample.png"), "wb") as fout:
           plt.savefig(fout)
