@@ -170,10 +170,14 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', config.data.dataset_name)
     xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
     xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, config.data.image_size), grid_latitude=slice(0, config.data.image_size))
-    xr_data_train["pr"] = xr_data_train["pr"]/xr_data_train["pr"].max()
-    xr_data_train["target_pr"] = xr_data_train["target_pr"]/xr_data_train["target_pr"].max()
-    xr_data_eval["pr"] = xr_data_eval["pr"]/xr_data_train["pr"].max()
-    xr_data_eval["target_pr"] = xr_data_eval["target_pr"]/xr_data_train["target_pr"].max()
+
+    norm_factors = {}
+
+    for var in ["pr"] + ["target_pr"]:
+      norm_factors[var] = xr_data_train[var].max().values
+
+      xr_data_train[var] = xr_data_train[var]/norm_factors[var]
+      xr_data_eval[var] = xr_data_eval[var]/norm_factors[var]
 
     train_dataset = XRDataset(xr_data_train, ['pr'])
     eval_dataset = XRDataset(xr_data_eval, ['pr'])
