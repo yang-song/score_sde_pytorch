@@ -33,7 +33,7 @@ import models
 from models import utils as mutils
 # from models import ncsnv2
 # from models import ncsnpp
-# from models import cncsnpp
+from models import cncsnpp
 from models import cunet
 # from models import ddpm as ddpm_model
 from models import layerspp
