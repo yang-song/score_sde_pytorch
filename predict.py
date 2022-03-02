@@ -129,7 +129,7 @@ def load_config(config_name, sde):
 
 @app.command()
 def main(output_filepath: Path, data_dirpath: Path, dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), batch_size: int = 8, num_samples: int = 3):
-    workdir = os.path.join(os.getenv("DERIVED_DATA"), sde.value.lower(), config_name, data_dirpath.name)
+    workdir = os.path.join(os.getenv("DERIVED_DATA"), "score-sde", "workdirs", sde.value.lower(), config_name, data_dirpath.name)
     config = load_config(config_name, sde)
     config.training.batch_size = batch_size
     config.eval.batch_size = batch_size
