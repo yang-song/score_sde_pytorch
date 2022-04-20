@@ -9,3 +9,4 @@ absl-py==0.10.0
 torch>=1.7.0
 torchvision
 ninja
+tensorflow-probability==0.12.2
