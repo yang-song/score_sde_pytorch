@@ -44,6 +44,7 @@ Run the following to install a subset of necessary python packages for our code
 ```sh
 pip install -r requirements.txt
 ```
+Python 3.8 is required.
 
 ### Stats files for quantitative evaluation
 
