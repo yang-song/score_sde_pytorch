@@ -235,7 +235,7 @@ def train(config, workdir):
         with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
           np.save(fout, sample.cpu().numpy())
 
-        writer.add_image("samples", plot_to_image(fig), step=step)
+        writer.add_image("samples", plot_to_image(fig), step)
 
         # image_grid = make_grid(sample, nrow, padding=2)
         # with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
