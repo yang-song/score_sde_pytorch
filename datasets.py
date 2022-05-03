@@ -167,7 +167,7 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
   elif config.data.dataset == "XR":
     import os
     from torch.utils.data import DataLoader
-    data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', config.data.dataset_name)
+    data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
     xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
     xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, config.data.image_size), grid_latitude=slice(0, config.data.image_size))
 

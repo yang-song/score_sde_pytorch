@@ -8,6 +8,7 @@ from pathlib import Path
 import importlib
 import os
 import re
+import yaml
 # import functools
 # import itertools
 import torch
@@ -92,14 +93,15 @@ def load_model(config, sde, ckpt_filename):
 
     return score_model, sampling_fn
 
-def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, num_samples = 3):
-    cond_batch = torch.Tensor(cond_xr['pr'].values/norm_factors["pr"]).unsqueeze(dim=1).to(config.device)
-    samples = [sampling_fn(score_model, cond_batch)[0]*norm_factors["target_pr"] for i in range(num_samples)]
+def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
+    cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()]).to(config.device)
+
+    samples = [sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"] for i in range(num_samples)]
     return samples
 
-def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, num_samples = 3):
+def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
     print("making predictions", flush=True)
-    samples = generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, num_samples)
+    samples = generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples)
 
     coords = {"time": cond_xr.coords["time"], "grid_longitude": cond_xr.coords["grid_longitude"], "grid_latitude": cond_xr.coords["grid_latitude"]}
     dims=["time", "grid_latitude", "grid_longitude"]
@@ -108,8 +110,9 @@ def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors
         coords=coords,
         attrs={}
     )
-    ds['target_pr'] = cond_xr['target_pr']
-    ds['pr'] = cond_xr['pr'].clip(0.01)
+    ds["target_pr"] = cond_xr["target_pr"]
+    for variable in norm_factors.keys():
+        ds[variable] = cond_xr[variable]
 
     for i, sample in enumerate(samples):
         sample = sample.cpu().numpy().clip(0.01)
@@ -144,16 +147,19 @@ def main(output_filepath: Path, data_dirpath: Path, dataset_split: str = "val", 
     xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
     xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{dataset_split}.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
 
-    norm_factors = {
-        "pr": xr_data_train["pr"].max().values.item(),
-        "target_pr": xr_data_train["target_pr"].max().values.item(),
-    }
+    with open(os.path.join(data_dirpath, 'ds-config.yml'), 'r') as f:
+        ds_config = yaml.safe_load(f)
+
+    variables = [ pred_meta["variable"] for pred_meta in ds_config["predictors"] ]
+
+    norm_factors = { variable: xr_data_train[variable].max().values.item() for variable in variables }
+    target_norm_factors = {"target_pr": xr_data_train["target_pr"].max().values.item()}
 
     # eval_dl = DataLoader(XRDataset(xr_data_eval, variables=["pr"]), batch_size=config.training.batch_size)
     _, eval_dl, _ = datasets.get_dataset(config, evaluation=True)
 
     eval_cond_xr = xr_data_eval.isel(time=slice(0,batch_size))
-    preds = [generate_predictions(sampling_fn, score_model, config, xr_data_eval.isel(time=slice(i, i+config.eval.batch_size)), norm_factors, num_samples=num_samples) for i in range(0, len(xr_data_eval.time), config.eval.batch_size)]
+    preds = [generate_predictions(sampling_fn, score_model, config, xr_data_eval.isel(time=slice(i, i+config.eval.batch_size)), norm_factors, target_norm_factors, num_samples=num_samples) for i in range(0, len(xr_data_eval.time), config.eval.batch_size)]
 
     ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
 
