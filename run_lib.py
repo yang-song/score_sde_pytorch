@@ -196,10 +196,13 @@ def train(config, workdir):
     if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
       # Save the checkpoint.
       save_step = step // config.training.snapshot_freq
-      save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.pth'), state)
+      checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_{save_step}.pth')
+      save_checkpoint(checkpoint_path, state)
+      logging.info(f"step: {step}, checkpoint saved to {checkpoint_path}")
 
       # Generate and save samples
       if config.training.snapshot_sampling:
+        logging.info("step: %d, sampling...")
         ema.store(score_model.parameters())
         ema.copy_to(score_model.parameters())
 
@@ -241,7 +244,6 @@ def train(config, workdir):
 
         with writer.as_default():
           tf.summary.image("samples", plot_to_image(fig), step=step)
-
 
         # image_grid = make_grid(sample, nrow, padding=2)
         # with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
