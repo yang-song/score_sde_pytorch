@@ -40,7 +40,7 @@ def get_default_configs():
   # data
   config.data = data = ml_collections.ConfigDict()
   data.dataset = 'XR'
-  data.dataset_name = '2.2km-coarsened-2x_london_pr_random'
+  data.dataset_name = '2.2km-coarsened-8x_london_vorticity850_random'
   data.image_size = 32
   data.random_flip = False
   data.centered = False
