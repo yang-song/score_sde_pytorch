@@ -52,6 +52,21 @@ import xarray as xr
 
 FLAGS = flags.FLAGS
 
+def plot_to_image(figure):
+  """Converts the matplotlib plot specified by 'figure' to a PNG image and
+  returns it. The supplied figure is closed and inaccessible after this call."""
+  # Save the plot to a PNG in memory.
+  buf = io.BytesIO()
+  plt.savefig(buf, format='png')
+  # Closing the figure prevents it from being displayed directly inside
+  # the notebook.
+  plt.close(figure)
+  buf.seek(0)
+  # Convert PNG buffer to TF image
+  image = tf.image.decode_png(buf.getvalue(), channels=4)
+  # Add the batch dimension
+  image = tf.expand_dims(image, 0)
+  return image
 
 def train(config, workdir):
   """Runs the training pipeline.
@@ -219,6 +234,8 @@ def train(config, workdir):
 
         with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.np"), "wb") as fout:
           np.save(fout, sample.cpu().numpy())
+
+        writer.add_image("samples", plot_to_image(fig), step=step)
 
         # image_grid = make_grid(sample, nrow, padding=2)
         # with tf.io.gfile.GFile(os.path.join(this_sample_dir, "sample.png"), "wb") as fout:
