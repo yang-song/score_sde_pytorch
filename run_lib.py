@@ -83,7 +83,7 @@ def train(config, workdir):
 
   tb_dir = os.path.join(workdir, "tensorboard")
   tf.io.gfile.makedirs(tb_dir)
-  writer = tensorboard.SummaryWriter(tb_dir)
+  writer = tf.summary.create_file_writer(tb_dir)
 
   # Initialize model.
   score_model = mutils.create_model(config)
@@ -163,7 +163,8 @@ def train(config, workdir):
     loss = train_step_fn(state, x_batch, cond_batch)
     if step % config.training.log_freq == 0:
       logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
-      writer.add_scalar("training_loss", loss, step)
+      with writer.as_default():
+          tf.summary.scalar("training_loss", loss.cpu().detach(), step=step)
 
     # Save a temporary checkpoint to resume training after pre-emption periodically
     if step != 0 and step % config.training.snapshot_freq_for_preemption == 0:
@@ -188,7 +189,8 @@ def train(config, workdir):
         val_set_loss = val_set_loss/len(eval_ds)
 
       logging.info("step: %d, eval_loss: %.5e" % (step, val_set_loss))
-      writer.add_scalar("eval_loss", val_set_loss, step)
+      with writer.as_default():
+          tf.summary.scalar("eval_loss", val_set_loss, step=step)
 
     # Save a checkpoint periodically and generate samples if needed
     if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
