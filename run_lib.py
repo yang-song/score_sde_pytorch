@@ -202,7 +202,7 @@ def train(config, workdir):
 
       # Generate and save samples
       if config.training.snapshot_sampling:
-        logging.info("step: %d, sampling...")
+        logging.info(f"step: {step}, sampling...")
         ema.store(score_model.parameters())
         ema.copy_to(score_model.parameters())
 
