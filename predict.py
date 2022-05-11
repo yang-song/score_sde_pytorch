@@ -93,18 +93,18 @@ def load_model(config, sde, ckpt_filename):
 
     return score_model, sampling_fn
 
-def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
+def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors):
     cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()], axis=1).to(config.device)
 
-    samples = torch.stack([sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"] for i in range(num_samples)]).cpu().numpy()
+    samples = torch.unsqueeze(sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"]).cpu().numpy()
     return samples
 
-def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
+def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, sample_id):
     print("making predictions", flush=True)
-    samples = generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples)
+    samples = generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors)
 
     coords = dict(cond_xr.coords)#{key: dict(cond_xr.coords)[key] for key in ["time", "grid_longitude", "grid_latitude"]}
-    coords = coords | {"sample_id": ("sample_id", range(8))}
+    coords = {**coords, "sample_id": ("sample_id", [sample_id])}
 
     pred_pr_dims=["sample_id", "time", "grid_latitude", "grid_longitude"]
     pred_pr_attrs = {"grid_mapping": "rotated_latitude_longitude", "standard_name": "pred_pr", "units": "kg m-2 s-1"}
@@ -127,7 +127,7 @@ def load_config(config_name, sde):
     return module.get_config()
 
 @app.command()
-def main(output_filepath: Path, data_dirpath: Path, dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), batch_size: int = 8, num_samples: int = 3):
+def main(output_dirpath: Path, data_dirpath: Path, dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), batch_size: int = 8, num_samples: int = 3):
     workdir = os.path.join(os.getenv("DERIVED_DATA"), "score-sde", "workdirs", sde.value.lower(), config_name, data_dirpath.name)
     config = load_config(config_name, sde)
     config.training.batch_size = batch_size
@@ -155,13 +155,16 @@ def main(output_filepath: Path, data_dirpath: Path, dataset_split: str = "val", 
     _, eval_dl, _ = datasets.get_dataset(config, evaluation=True)
 
     eval_cond_xr = xr_data_eval.isel(time=slice(0,batch_size))
-    preds = [generate_predictions(sampling_fn, score_model, config, xr_data_eval.isel(time=slice(i, i+config.eval.batch_size)), norm_factors, target_norm_factors, num_samples=num_samples) for i in range(0, len(xr_data_eval.time), config.eval.batch_size)]
+    for sample_id in range(num_samples):
+        typer.echo(f"Sample run {sample_id}...")
+        preds = [generate_predictions(sampling_fn, score_model, config, xr_data_eval.isel(time=slice(i, i+config.eval.batch_size)), norm_factors, target_norm_factors, sample_id) for i in range(0, len(xr_data_eval.time), config.eval.batch_size)]
 
-    ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
+        ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
 
-    # ds = generate_predictions(sampling_fn, score_model, config, eval_cond_xr, norm_factors, num_samples=num_samples)
 
-    ds.to_netcdf(output_filepath)
+        output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
+        typer.echo(f"Saving samples to {output_filepath}...")
+        ds.to_netcdf(output_filepath)
 
 
 if __name__ == "__main__":
