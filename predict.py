@@ -148,7 +148,7 @@ def main(output_dirpath: Path, data_dirpath: Path, dataset_split: str = "val", s
     # Data
     # data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', '2.2km-coarsened-2x_london_pr_random')
     xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
-    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{dataset_split}.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size)).isel(time=slice(10))
+    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{dataset_split}.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
 
     with open(os.path.join(data_dirpath, 'ds-config.yml'), 'r') as f:
         ds_config = yaml.safe_load(f)
