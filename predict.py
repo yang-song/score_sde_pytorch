@@ -96,7 +96,14 @@ def load_model(config, sde, ckpt_filename):
 def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors):
     cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()], axis=1).to(config.device)
 
-    samples = (sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"]).unsqueeze(dim=0).cpu().numpy()
+    samples = sampling_fn(score_model, cond_batch)[0]
+    # drop the feature channel dimension (only have target pr as output)
+    # add a dimension for sample_id
+    samples = samples.squeeze(dim=1).unsqueeze(dim=0)
+    # re-scale samples to match precip data
+    samples = samples*target_norm_factors["target_pr"]
+    # extract numpy array
+    samples = samples.cpu().numpy()
     return samples
 
 def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, sample_id):
