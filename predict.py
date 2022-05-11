@@ -171,6 +171,7 @@ def main(output_dirpath: Path, data_dirpath: Path, dataset_split: str = "val", s
 
         output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")
+        os.makedirs(output_filepath.dirpath(), exist_ok=True)
         ds.to_netcdf(output_filepath)
 
 
