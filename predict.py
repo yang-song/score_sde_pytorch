@@ -94,7 +94,7 @@ def load_model(config, sde, ckpt_filename):
     return score_model, sampling_fn
 
 def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
-    cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()]).to(config.device)
+    cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()], axis=1).to(config.device)
 
     samples = torch.stack([sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"] for i in range(num_samples)]).cpu().numpy()
     return samples
