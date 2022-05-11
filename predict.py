@@ -96,31 +96,27 @@ def load_model(config, sde, ckpt_filename):
 def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
     cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()]).to(config.device)
 
-    samples = [sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"] for i in range(num_samples)]
+    samples = torch.stack([sampling_fn(score_model, cond_batch)[0]*target_norm_factors["target_pr"] for i in range(num_samples)]).cpu().numpy()
     return samples
 
 def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples = 3):
     print("making predictions", flush=True)
     samples = generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, num_samples)
 
-    coords = {"time": cond_xr.coords["time"], "grid_longitude": cond_xr.coords["grid_longitude"], "grid_latitude": cond_xr.coords["grid_latitude"]}
-    dims=["time", "grid_latitude", "grid_longitude"]
-    ds = xr.Dataset(
-        data_vars={key: cond_xr.data_vars[key] for key in ["time_bnds", "grid_latitude_bnds", "grid_longitude_bnds", "rotated_latitude_longitude"]},
-        coords=coords,
-        attrs={}
-    )
-    ds["target_pr"] = cond_xr["target_pr"]
-    for variable in norm_factors.keys():
-        ds[variable] = cond_xr[variable]
+    coords = dict(cond_xr.coords)#{key: dict(cond_xr.coords)[key] for key in ["time", "grid_longitude", "grid_latitude"]}
+    coords = coords | {"sample_id": ("sample_id", range(8))}
 
-    for i, sample in enumerate(samples):
-        sample = sample.cpu().numpy().clip(0.01)
+    pred_pr_dims=["sample_id", "time", "grid_latitude", "grid_longitude"]
+    pred_pr_attrs = {"grid_mapping": "rotated_latitude_longitude", "standard_name": "pred_pr", "units": "kg m-2 s-1"}
+    pred_pr_var = (pred_pr_dims, samples, pred_pr_attrs)
+    # data_vars =
 
-        ds[f'pred_pr{i}'] = xr.DataArray(sample[:,0], dims=dims)
+    data_vars = {key: cond_xr.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds", "forecast_period_bnds"]}
+    data_vars.update({"pred_pr": pred_pr_var})
 
-    return ds
+    samples_ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs={})
 
+    return samples_ds
 
 def load_config(config_name, sde):
     config_path = os.path.join(os.path.dirname(__file__), "configs", re.sub(r'sde$', '', sde.value.lower()), f"{config_name}.py")
