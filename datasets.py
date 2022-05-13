@@ -175,6 +175,11 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     target_variables = ["target_pr"]
 
     for var in variables:
+      mean = xr_data_train[var].mean()
+      std = xr_data_train[var].std()
+      xr_data_train[var] = (xr_data_train[var] - mean)/std
+      xr_data_eval[var] = (xr_data_eval[var] - mean)/std
+
       nf = xr_data_train[var].max().values
       xr_data_train[var] = xr_data_train[var]/nf
       xr_data_eval[var] = xr_data_eval[var]/nf
