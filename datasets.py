@@ -15,6 +15,9 @@
 
 # pylint: skip-file
 """Return training and evaluation/test datasets from config files."""
+import os
+import yaml
+
 # import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
@@ -22,8 +25,96 @@ import tensorflow_datasets as tfds
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, DataLoader
 import xarray as xr
+
+class CropT():
+  def __init__(self, size):
+    self.size = size
+
+  def fit(self, train_ds):
+    return self
+
+  def transform(self, ds):
+    return ds.isel(grid_longitude=slice(0, self.size),grid_latitude=slice(0, self.size))
+
+class Standardize():
+  def __init__(self, variables):
+    self.variables = variables
+
+  def fit(self, train_ds):
+    self.means = { var:  train_ds[var].mean().values for var in self.variables }
+    self.stds = { var:  train_ds[var].std().values for var in self.variables }
+
+    return self
+
+  def transform(self, ds):
+    for var in self.variables:
+      ds[var] = (ds[var] - self.means[var])/self.stds[var]
+
+    return ds
+
+class UnitRangeT():
+  def __init__(self, variables):
+    self.variables = variables
+
+  def fit(self, train_ds):
+    self.maxs = { var:  train_ds[var].max().values for var in self.variables }
+
+    return self
+
+  def transform(self, ds):
+    for var in self.variables:
+      ds[var] = ds[var]/self.maxs[var]
+
+    return ds
+
+  def invert(self, ds):
+    for var in self.variables:
+      ds[var] = ds[var]*self.maxs[var]
+
+    return ds
+
+class SqrtT():
+  def __init__(self, variables):
+    self.variables = variables
+
+  def fit(self, _train_ds):
+    return self
+
+  def transform(self, ds):
+    for var in self.variables:
+      ds[var] = ds[var]**(0.5)
+
+    return ds
+
+  def invert(self, ds):
+    for var in self.variables:
+      ds[var] = ds[var]**2
+
+    return ds
+
+class ComposeT():
+  def __init__(self, transforms):
+    self.transforms = transforms
+
+  def fit_transform(self, train_ds):
+    for t in self.transforms:
+      train_ds = t.fit(train_ds).transform(train_ds)
+
+    return train_ds
+
+  def transform(self, ds):
+    for t in self.transforms:
+      ds = t.transform(ds)
+
+    return ds
+
+  def invert(self, ds):
+    for t in reversed(self.transforms):
+      ds = t.invert(ds)
+
+    return ds
 
 class XRDataset(Dataset):
     def __init__(self, ds, variables):
@@ -36,10 +127,39 @@ class XRDataset(Dataset):
     def __getitem__(self, idx):
         subds = self.ds.isel(time=idx)
 
-        X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
-        y = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
+        cond = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
 
-        return X, y
+        x = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
+
+        return cond, x
+
+def get_variables(config):
+  data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
+  with open(os.path.join(data_dirpath, 'ds-config.yml'), 'r') as f:
+      ds_config = yaml.safe_load(f)
+
+  variables = [ pred_meta["variable"] for pred_meta in ds_config["predictors"] ]
+  target_variables = ["target_pr"]
+
+  return variables, target_variables
+
+def get_transform(config):
+  variables, target_variables = get_variables(config)
+  data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
+  xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc'))
+
+  transform = ComposeT([
+    CropT(config.data.image_size),
+    Standardize(variables),
+    UnitRangeT(variables)])
+  target_transform = ComposeT([
+    SqrtT(target_variables),
+    UnitRangeT(target_variables),
+  ])
+  xr_data_train = transform.fit_transform(xr_data_train)
+  xr_data_train = target_transform.fit_transform(xr_data_train)
+
+  return transform, target_transform, xr_data_train
 
 def get_data_scaler(config):
   """Data normalizer. Assume data are always in [0, 1]."""
@@ -89,7 +209,7 @@ def central_crop(image, size):
   return tf.image.crop_to_bounding_box(image, top, left, size, size)
 
 
-def get_dataset(config, uniform_dequantization=False, evaluation=False):
+def get_dataset(config, uniform_dequantization=False, evaluation=False, split='val'):
   """Create data loaders for training and evaluation.
 
   Args:
@@ -165,37 +285,20 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
 
 
   elif config.data.dataset == "XR":
-    import os
-    from torch.utils.data import DataLoader
+    variables, target_variables = get_variables(config)
+    transform, target_transform, xr_data_train = get_transform(config)
+
     data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
-    xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
-    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, config.data.image_size), grid_latitude=slice(0, config.data.image_size))
-
-    variables = config.data.dataset_name.split("_")[2].split("-")
-    target_variables = ["target_pr"]
-
-    for var in variables:
-      mean = xr_data_train[var].mean()
-      std = xr_data_train[var].std()
-      xr_data_train[var] = (xr_data_train[var] - mean)/std
-      xr_data_eval[var] = (xr_data_eval[var] - mean)/std
-
-      nf = xr_data_train[var].max().values
-      xr_data_train[var] = xr_data_train[var]/nf
-      xr_data_eval[var] = xr_data_eval[var]/nf
-
-    for target_var in target_variables:
-      xr_data_train[target_var] = xr_data_train[target_var]**(1/2)
-      xr_data_eval[target_var] = xr_data_eval[target_var]**(1/2)
-
-      nf = xr_data_train[target_var].max().values
-      xr_data_train[target_var] = xr_data_train[target_var]/nf
-      xr_data_eval[target_var] = xr_data_eval[target_var]/nf
+    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{split}.nc')).isel(time=slice(140))
+    xr_data_eval = transform.transform(xr_data_eval)
+    xr_data_eval = target_transform.transform(xr_data_eval)
 
     train_dataset = XRDataset(xr_data_train, variables)
     eval_dataset = XRDataset(xr_data_eval, variables)
+
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
     eval_data_loader = DataLoader(eval_dataset, batch_size=batch_size)
+    print(train_data_loader.dataset.ds["target_pr"].values[0,0,0])
     return train_data_loader, eval_data_loader, None
   else:
     raise NotImplementedError(
