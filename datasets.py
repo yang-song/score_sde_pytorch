@@ -305,7 +305,7 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False, split='v
     transform, target_transform, xr_data_train = get_transform(config)
 
     data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
-    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{split}.nc')).isel(time=slice(140))
+    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{split}.nc'))
     xr_data_eval = transform.transform(xr_data_eval)
     xr_data_eval = target_transform.transform(xr_data_eval)
 
