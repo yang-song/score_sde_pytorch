@@ -90,6 +90,8 @@ class ClipT():
     for var in self.variables:
       ds[var] = ds[var].clip(min=0.0)
 
+    return ds
+
 class SqrtT():
   def __init__(self, variables):
     self.variables = variables
