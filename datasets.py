@@ -75,6 +75,21 @@ class UnitRangeT():
 
     return ds
 
+class ClipT():
+  def __init__(self, variables):
+    self.variables = variables
+
+  def fit(self, _train_ds):
+    return self
+
+  def transform(self, ds):
+    # target pr should be all non-negative so transform is no-op
+    return ds
+
+  def invert(self, ds):
+    for var in self.variables:
+      ds[var] = ds[var].clip(min=0.0)
+
 class SqrtT():
   def __init__(self, variables):
     self.variables = variables
@@ -154,6 +169,7 @@ def get_transform(config):
     UnitRangeT(variables)])
   target_transform = ComposeT([
     SqrtT(target_variables),
+    ClipT(target_variables),
     UnitRangeT(target_variables),
   ])
   xr_data_train = transform.fit_transform(xr_data_train)
