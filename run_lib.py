@@ -96,6 +96,9 @@ def train(config, workdir):
   elif config.training.sde.lower() == 'vesde':
     sde = sde_lib.VESDE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max, N=config.model.num_scales)
     sampling_eps = 1e-5
+  elif config.training.sde.lower() == 'numeric_vpsde':
+    sde = sde_lib.NUMSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales) 
+    sampling_eps = 1e-3
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
 
@@ -268,6 +271,8 @@ def evaluate(config,
       if not waiting_message_printed:
         logging.warning("Waiting for the arrival of checkpoint_%d" % (ckpt,))
         waiting_message_printed = True
+      logging.warning("Sleeping for 60s while waiting for the arrival of checkpoint_%d" % (ckpt,))
+      logging.warning(ckpt_filename)
       time.sleep(60)
 
     # Wait for 2 additional mins in case the file exists but is not ready for reading
