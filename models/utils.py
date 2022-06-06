@@ -171,6 +171,12 @@ def get_score_fn(sde, model, train=False, continuous=False):
 
       score = model_fn(x, labels)
       return score
+  
+  elif isinstance(sde, sde_lib.NUMSDE):
+    def score_fn(x, t):
+      labels = t * (sde.N - 1)
+      score = model_fn(x, labels)
+      return score
 
   else:
     raise NotImplementedError(f"SDE class {sde.__class__.__name__} not yet supported.")
