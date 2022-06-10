@@ -13,14 +13,35 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+def print_input_data_summary(xs, ts, die=False):
+    print("---------------------")
+    print("SUMMARY OF INPUT DATA")
+    print("---------------------")
+    print("xs:")
+    print("  shape:", xs.shape)
+    print("  min:", xs.min())
+    print("  max:", xs.max())
+    print("  mean:", xs.mean())
+    print("  xs[0]:", xs[0])
+    print("ts:")
+    print("  shape:", ts.shape)
+    print("  min:", ts.min())
+    print("  max:", ts.max())
+    #print("  mean:", ts.mean())
+    print("  ts[0]:", ts[0])
+    if die:
+      raise Exception
+    
+
 """All functions related to loss computation and optimization.
 """
 
+from re import I
 import torch
 import torch.optim as optim
 import numpy as np
 from models import utils as mutils
-from sde_lib import VESDE, VPSDE, NUMSDE
+from sde_lib import VESDE, VPSDE
 
 
 def get_optimizer(config, params):
@@ -127,7 +148,7 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
 
 def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
   """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
-  assert isinstance(vpsde, VPSDE), "DDPM training only works for VPSDEs."
+  assert isinstance(vpsde, VPSDE) or isinstance(vpsde, NUMSDE), "DDPM training only works for VPSDEs."
 
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
@@ -139,6 +160,9 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
     noise = torch.randn_like(batch)
     perturbed_data = sqrt_alphas_cumprod[labels, None, None, None] * batch + \
                      sqrt_1m_alphas_cumprod[labels, None, None, None] * noise
+
+    
+    #print_input_data_summary(xs=perturbed_data, ts=labels, die=True)
     score = model_fn(perturbed_data, labels)
     losses = torch.square(score - noise)
     losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
@@ -151,35 +175,57 @@ def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
 
 def get_score_matching_loss_fn(sde, train, reduce_mean=True):
   """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
-  assert isinstance(sde, NUMSDE), "DDPM training only works for VPSDEs."
+  assert isinstance(sde, VPSDE), "DDPM training only works for VPSDEs."
 
   reduce_op = torch.mean if reduce_mean else lambda *args, **kwargs: 0.5 * torch.sum(*args, **kwargs)
 
   def loss_fn(model, batch):
     model_fn = mutils.get_model_fn(model, train=train)
+    #model_fn = mutils.get_score_fn(sde, model, train=train, continuous=False)
     ts = torch.randint(0, sde.N, (batch.shape[0],), device=batch.device)
-    
-    numeric=False
-    if not numeric:
-      sqrt_alphas_cumprod = sde.sqrt_alphas_cumprod.to(batch.device)
-      sqrt_1m_alphas_cumprod = sde.sqrt_1m_alphas_cumprod.to(batch.device)
-      noise = torch.randn_like(batch)
-      perturbed_data = sqrt_alphas_cumprod[ts, None, None, None] * batch + \
-                       sqrt_1m_alphas_cumprod[ts, None, None, None] * noise
-    elif numeric:
-      perturbed_data = NUMSDE.numeric_sample(x0=batch, Tmax=ts)
+    #labels = ts / sde.N
+    print("ATTENTION: Using score matching loss function")
 
-    perturbed_data.requires_grad_(True)  
-    score = model_fn(perturbed_data, ts)
+    with torch.no_grad():
+        numeric=False
+        if not numeric:
+          sqrt_alphas_cumprod = sde.sqrt_alphas_cumprod.to(batch.device)
+          sqrt_1m_alphas_cumprod = sde.sqrt_1m_alphas_cumprod.to(batch.device)
+          noise = torch.randn_like(batch)
+          perturbed_data = sqrt_alphas_cumprod[ts, None, None, None] * batch + \
+                          sqrt_1m_alphas_cumprod[ts, None, None, None] * noise
+        elif numeric:
+          perturbed_data = sde.numeric_sample(x0=batch, Tmax=ts)
 
-    grad_score = torch.autograd.grad(score, perturbed_data, create_graph=True)[0]
+    if train:
+      xs = perturbed_data.detach()
+      xs.requires_grad_(True)
 
-    losses = torch.mean(grad_score) + 0.5*torch.mean(score)
+      nbatch, nchannel, nwidth, nheight = xs.shape
 
-    return losses
+      vectors = torch.randn(nbatch, nchannel*nwidth*nheight).to(xs.device)
+      #vectors = vectors / torch.norm(vectors, dim=-1, keepdim=True)
+      #print_input_data_summary(xs=xs, ts=ts, die=False)
+      score = model_fn(xs, ts)
 
+      score = torch.reshape(score, vectors.shape)  # [32, 3072]
+
+      scorev = torch.sum(score * vectors)  #scalar
+
+
+      loss1 = torch.sum(score * vectors, dim=-1) ** 2 * 0.5
+      grad2 = torch.autograd.grad(scorev, xs, create_graph=True)[0]
+      grad2 = torch.reshape(grad2, vectors.shape)
+      loss2 = torch.sum(vectors * grad2, dim=-1)
+
+      loss = loss1 + loss2
+      
+      loss = loss.mean(dim=0)
+
+      return loss
+    else:
+        return torch.tensor([0.])
   return loss_fn
-
 
 
 def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True, likelihood_weighting=False):
@@ -204,8 +250,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     if isinstance(sde, VESDE):
       loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
     elif isinstance(sde, VPSDE):
-      loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
-    elif isinstance(sde, NUMSDE):
+      #loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
       loss_fn = get_score_matching_loss_fn(sde, train, reduce_mean=reduce_mean)
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")

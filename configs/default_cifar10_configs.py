@@ -16,7 +16,7 @@ def get_default_configs():
   ## produce samples at each snapshot.
   training.snapshot_sampling = True
   training.likelihood_weighting = False
-  training.continuous = True
+  training.continuous = False
   training.reduce_mean = False
 
   # sampling
@@ -58,13 +58,13 @@ def get_default_configs():
 
   # optimization
   config.optim = optim = ml_collections.ConfigDict()
-  optim.weight_decay = 0
+  optim.weight_decay = 0.0 #originally zero
   optim.optimizer = 'Adam'
   optim.lr = 2e-4
   optim.beta1 = 0.9
   optim.eps = 1e-8
-  optim.warmup = 5000
-  optim.grad_clip = 1.
+  optim.warmup = 50
+  optim.grad_clip = 0.1  #1 originally
 
   config.seed = 42
   config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
