@@ -6,17 +6,17 @@ def get_default_configs():
   config = ml_collections.ConfigDict()
   # training
   config.training = training = ml_collections.ConfigDict()
-  config.training.batch_size = 128
-  training.n_iters = 1300001
-  training.snapshot_freq = 50000
-  training.log_freq = 50
-  training.eval_freq = 100
+  config.training.batch_size = 32 
+  training.n_iters = 130000
+  training.snapshot_freq = 100 
+  training.log_freq = 1
+  training.eval_freq = 1000 
   ## store additional checkpoints for preemption in cloud computing environments
-  training.snapshot_freq_for_preemption = 10000
+  training.snapshot_freq_for_preemption = 500
   ## produce samples at each snapshot.
   training.snapshot_sampling = True
   training.likelihood_weighting = False
-  training.continuous = True
+  training.continuous = False
   training.reduce_mean = False
 
   # sampling
@@ -28,11 +28,11 @@ def get_default_configs():
 
   # evaluation
   config.eval = evaluate = ml_collections.ConfigDict()
-  evaluate.begin_ckpt = 9
-  evaluate.end_ckpt = 26
+  evaluate.begin_ckpt = 1
+  evaluate.end_ckpt = 1
   evaluate.batch_size = 1024
-  evaluate.enable_sampling = False
-  evaluate.num_samples = 50000
+  evaluate.enable_sampling = True
+  evaluate.num_samples = 100
   evaluate.enable_loss = True
   evaluate.enable_bpd = False
   evaluate.bpd_dataset = 'test'
@@ -58,13 +58,13 @@ def get_default_configs():
 
   # optimization
   config.optim = optim = ml_collections.ConfigDict()
-  optim.weight_decay = 0
+  optim.weight_decay = 0.0 #originally zero
   optim.optimizer = 'Adam'
   optim.lr = 2e-4
   optim.beta1 = 0.9
   optim.eps = 1e-8
-  optim.warmup = 5000
-  optim.grad_clip = 1.
+  optim.warmup = 50
+  optim.grad_clip = 0.1  #1 originally
 
   config.seed = 42
   config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
