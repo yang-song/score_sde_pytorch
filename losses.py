@@ -80,20 +80,46 @@ def get_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_we
     Returns:
       loss: A scalar that represents the average loss value across the mini-batch.
     """
+    if not train:
+      return torch.zeros(1)
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
     t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
     z = torch.randn_like(batch)
-    mean, std = sde.marginal_prob(batch, t)
-    perturbed_data = mean + std[:, None, None, None] * z
-    score = score_fn(perturbed_data, t)
+    
+    with torch.no_grad():
+      mean, std = sde.marginal_prob(batch, t)
+      perturbed_data = mean + std[:, None, None, None] * z
+    perturbed_data = perturbed_data.detach()
 
-    if not likelihood_weighting:
-      losses = torch.square(score * std[:, None, None, None] + z)
-      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
-    else:
-      g2 = sde.sde(torch.zeros_like(batch), t)[1] ** 2
-      losses = torch.square(score + z / std[:, None, None, None])
-      losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1) * g2
+    xs = perturbed_data
+    xs.requires_grad_(True)
+
+    score = score_fn(xs, t)
+
+    nbatch, nchannels, width, height = xs.shape
+
+    vectors = torch.randn(nbatch, nchannels*width*height).to(batch.device)
+    vectors = vectors / torch.norm(vectors, dim=-1, keepdim=True)
+
+    score = torch.reshape(score, vectors.shape)
+
+    scorev = torch.sum(score*vectors)
+
+    grad2 = torch.autograd.grad(scorev, xs, create_graph=True)[0]
+    grad2 = grad2.reshape(vectors.shape)
+    loss2 = torch.sum(vectors*grad2, dim=-1)
+    
+    loss1 = torch.sum(score*vectors, dim=-1) ** 2 * 0.5
+
+    loss = loss1 + loss2
+
+    return loss.mean()
+
+
+    print(f"Using get_sde_loss_fn with likelihood_weighting={likelihood_weighting}")
+
+    losses = torch.square(score * std[:, None, None, None] + z)
+    losses = reduce_op(losses.reshape(losses.shape[0], -1), dim=-1)
 
     loss = torch.mean(losses)
     return loss
@@ -170,7 +196,7 @@ def get_step_fn(sde, train, optimize_fn=None, reduce_mean=False, continuous=True
     if isinstance(sde, VESDE):
       loss_fn = get_smld_loss_fn(sde, train, reduce_mean=reduce_mean)
     elif isinstance(sde, VPSDE):
-      loss_fn = get_ddpm_loss_fn(sde, train, reduce_mean=reduce_mean)
+      loss_fn = get_sde_loss_fn(sde, train, reduce_mean=reduce_mean, likelihood_weighting=likelihood_weighting) 
     else:
       raise ValueError(f"Discrete training for {sde.__class__.__name__} is not recommended.")
 
