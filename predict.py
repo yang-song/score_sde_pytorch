@@ -130,11 +130,12 @@ def load_config(config_name, sde):
     return module.get_config()
 
 @app.command()
-def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), batch_size: int = 8, num_samples: int = 3):
+def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = 32, batch_size: int = 8, num_samples: int = 3):
     config = load_config(config_name, sde)
     config.training.batch_size = batch_size
     config.eval.batch_size = batch_size
     config.data.dataset_name = dataset
+    config.data.image_size = image_size
 
     output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"
 
