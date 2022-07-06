@@ -97,7 +97,7 @@ def train(config, workdir):
     sde = sde_lib.VESDE(sigma_min=config.model.sigma_min, sigma_max=config.model.sigma_max, N=config.model.num_scales)
     sampling_eps = 1e-5
   elif config.training.sde.lower() == 'scorevpsde':
-    sde = sde_lib.scoreVPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales, model = score_model)
+    sde = sde_lib.scoreVPSDE(beta_min=config.model.beta_min, beta_max=config.model.beta_max, N=config.model.num_scales, state = state, num_train_steps=config.training.n_iters)
     sampling_eps = 1e-3  
   else:
     raise NotImplementedError(f"SDE {config.training.sde} unknown.")
