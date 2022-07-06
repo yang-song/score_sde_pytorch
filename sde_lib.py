@@ -1,5 +1,7 @@
 """Abstract SDE classes, Reverse SDE, and VE/VP SDEs."""
 import abc
+from pickle import NONE
+from re import L
 import torch
 import numpy as np
 
@@ -137,6 +139,73 @@ class VPSDE(SDE):
     drift = -0.5 * beta_t[:, None, None, None] * x
     diffusion = torch.sqrt(beta_t)
     return drift, diffusion
+
+  def marginal_prob(self, x, t):
+    log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
+    mean = torch.exp(log_mean_coeff[:, None, None, None]) * x
+    std = torch.sqrt(1. - torch.exp(2. * log_mean_coeff))
+    return mean, std
+
+  def prior_sampling(self, shape):
+    return torch.randn(*shape)
+
+  def prior_logp(self, z):
+    shape = z.shape
+    N = np.prod(shape[1:])
+    logps = -N / 2. * np.log(2 * np.pi) - torch.sum(z ** 2, dim=(1, 2, 3)) / 2.
+    return logps
+
+  def discretize(self, x, t):
+    """DDPM discretization."""
+    timestep = (t * (self.N - 1) / self.T).long()
+    beta = self.discrete_betas.to(x.device)[timestep]
+    alpha = self.alphas.to(x.device)[timestep]
+    sqrt_beta = torch.sqrt(beta)
+    f = torch.sqrt(alpha)[:, None, None, None] * x - x
+    G = sqrt_beta
+    return f, G
+
+
+class scoreVPSDE(SDE):
+  def __init__(self, beta_min=0.1, beta_max=20, N=1000, state=NONE, num_train_steps=100000, sde_change_step=0.7):
+    """Construct a Variance Preserving SDE.
+
+    Args:
+      beta_min: value of beta(0)
+      beta_max: value of beta(1)
+      N: number of discretization steps
+    """
+    super().__init__(N)
+    self.beta_0 = beta_min
+    self.beta_1 = beta_max
+    self.N = N
+    self.discrete_betas = torch.linspace(beta_min / N, beta_max / N, N)
+    self.alphas = 1. - self.discrete_betas
+    self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+    self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+    self.sqrt_1m_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
+    self.state = state
+    self.num_train_steps = num_train_steps
+    self.sde_change_step = sde_change_step
+
+
+  @property
+  def T(self):
+    return 1
+
+  def sde(self, x, t):
+    if self.sde_change_step < self.state['step']/self.num_train_steps:
+      beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
+      lam = 1-(self.state['step']/(self.num_train_steps+1))**2
+      model = self.state['model']
+      drift = -0.5 * beta_t[:, None, None, None] * x - 0.5*(1-lam**2) * beta_t[:, None, None, None] * model(x)
+      diffusion = torch.sqrt((lam**2)*beta_t)
+      return drift, diffusion 
+    else:
+      beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
+      drift = -0.5 * beta_t[:, None, None, None] * x
+      diffusion = torch.sqrt(beta_t)
+      return drift, diffusion
 
   def marginal_prob(self, x, t):
     log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
