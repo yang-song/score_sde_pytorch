@@ -3,4 +3,9 @@
 set -euo pipefail
 
 rm -rf output/test
-python main.py --workdir output/test --config configs/subvp/xarray_cunet_continuous.py --mode train --config.data.dataset_name=2.2km-coarsened-8x_london_vorticity850_random-sample --config.training.snapshot_freq=5 --config.training.eval_freq=2 --config.training.log_freq=1 --config.training.n_iters=15
+
+dataset="2.2km-coarsened-8x_london_vorticity850_random-sample"
+dataset="2.2km-coarsened-gcm-2.2km_london_vorticity850_random-sample"
+config="configs/subvp/xarray_cunet_continuous.py"
+
+python main.py --workdir output/test --config ${config} --mode train --config.data.dataset_name=${dataset} --config.training.snapshot_freq=5 --config.training.eval_freq=2 --config.training.log_freq=1 --config.training.n_iters=15
