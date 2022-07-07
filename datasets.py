@@ -15,31 +15,46 @@
 
 # pylint: skip-file
 """Return training and evaluation/test datasets from config files."""
+import os
+import yaml
+
 # import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
 
-
-import numpy as np
-import torch
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader
 import xarray as xr
 
-class XRDataset(Dataset):
-    def __init__(self, ds, variables):
-        self.ds = ds
-        self.variables = variables
+from ml_downscaling_emulator.training.dataset import CropT, Standardize, UnitRangeT, ClipT, SqrtT, ComposeT, XRDataset
 
-    def __len__(self):
-        return len(self.ds.time)
+def get_variables(config):
+  data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
+  with open(os.path.join(data_dirpath, 'ds-config.yml'), 'r') as f:
+      ds_config = yaml.safe_load(f)
 
-    def __getitem__(self, idx):
-        subds = self.ds.isel(time=idx)
+  variables = [ pred_meta["variable"] for pred_meta in ds_config["predictors"] ]
+  target_variables = ["target_pr"]
 
-        X = torch.tensor(np.stack([subds[var].values for var in self.variables], axis=0)).float()
-        y = torch.tensor(np.stack([subds["target_pr"].values], axis=0)).float()
+  return variables, target_variables
 
-        return X, y
+def get_transform(config):
+  variables, target_variables = get_variables(config)
+  data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
+  xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc'))
+
+  transform = ComposeT([
+    CropT(config.data.image_size),
+    Standardize(variables),
+    UnitRangeT(variables)])
+  target_transform = ComposeT([
+    SqrtT(target_variables),
+    ClipT(target_variables),
+    UnitRangeT(target_variables),
+  ])
+  xr_data_train = transform.fit_transform(xr_data_train)
+  xr_data_train = target_transform.fit_transform(xr_data_train)
+
+  return transform, target_transform, xr_data_train
 
 def get_data_scaler(config):
   """Data normalizer. Assume data are always in [0, 1]."""
@@ -89,7 +104,7 @@ def central_crop(image, size):
   return tf.image.crop_to_bounding_box(image, top, left, size, size)
 
 
-def get_dataset(config, uniform_dequantization=False, evaluation=False):
+def get_dataset(config, uniform_dequantization=False, evaluation=False, split='val'):
   """Create data loaders for training and evaluation.
 
   Args:
@@ -165,25 +180,20 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
 
 
   elif config.data.dataset == "XR":
-    import os
-    from torch.utils.data import DataLoader
+    variables, target_variables = get_variables(config)
+    transform, target_transform, xr_data_train = get_transform(config)
+
     data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'moose', 'nc-datasets', config.data.dataset_name)
-    xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
-    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, 'val.nc')).isel(grid_longitude=slice(0, config.data.image_size), grid_latitude=slice(0, config.data.image_size))
-
-    norm_factors = {}
-
-    variables = config.data.dataset_name.split("_")[2].split("-")
-    for var in variables + ["target_pr"]:
-      norm_factors[var] = xr_data_train[var].max().values
-
-      xr_data_train[var] = xr_data_train[var]/norm_factors[var]
-      xr_data_eval[var] = xr_data_eval[var]/norm_factors[var]
+    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{split}.nc'))
+    xr_data_eval = transform.transform(xr_data_eval)
+    xr_data_eval = target_transform.transform(xr_data_eval)
 
     train_dataset = XRDataset(xr_data_train, variables)
     eval_dataset = XRDataset(xr_data_eval, variables)
+
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
     eval_data_loader = DataLoader(eval_dataset, batch_size=batch_size)
+    print(train_data_loader.dataset.ds["target_pr"].values[0,0,0])
     return train_data_loader, eval_data_loader, None
   else:
     raise NotImplementedError(

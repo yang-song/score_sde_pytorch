@@ -93,36 +93,32 @@ def load_model(config, sde, ckpt_filename):
 
     return score_model, sampling_fn
 
-def generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors):
-    cond_batch = torch.stack([torch.Tensor(cond_xr[variable].values/nf) for variable, nf in norm_factors.items()], axis=1).to(config.device)
+def generate_samples(sampling_fn, score_model, config, cond_batch):
+    cond_batch = cond_batch.to(config.device)
 
     samples = sampling_fn(score_model, cond_batch)[0]
     # drop the feature channel dimension (only have target pr as output)
+    samples = samples.squeeze(dim=1)
     # add a dimension for sample_id
-    samples = samples.squeeze(dim=1).unsqueeze(dim=0)
-    # re-scale samples to match precip data
-    samples = samples*target_norm_factors["target_pr"]
+    samples = samples.unsqueeze(dim=0)
     # extract numpy array
     samples = samples.cpu().numpy()
     return samples
 
-def generate_predictions(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors, sample_id):
+def generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id):
     print("making predictions", flush=True)
-    samples = generate_samples(sampling_fn, score_model, config, cond_xr, norm_factors, target_norm_factors)
+    samples = generate_samples(sampling_fn, score_model, config, cond_batch)
 
-    coords = dict(cond_xr.coords)#{key: dict(cond_xr.coords)[key] for key in ["time", "grid_longitude", "grid_latitude"]}
-    coords = {**coords, "sample_id": ("sample_id", [sample_id])}
+    coords = {**dict(coords), "sample_id": ("sample_id", [sample_id])}
 
     pred_pr_dims=["sample_id", "time", "grid_latitude", "grid_longitude"]
     pred_pr_attrs = {"grid_mapping": "rotated_latitude_longitude", "standard_name": "pred_pr", "units": "kg m-2 s-1"}
     pred_pr_var = (pred_pr_dims, samples, pred_pr_attrs)
-    # data_vars =
 
-    data_vars = {key: cond_xr.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds", "forecast_period_bnds"]}
-    data_vars.update({"pred_pr": pred_pr_var})
+    data_vars = {**cf_data_vars, "target_pr": pred_pr_var}
 
-    samples_ds = xr.Dataset(data_vars=data_vars, coords=coords, attrs={})
-
+    samples_ds = target_transform.invert(xr.Dataset(data_vars=data_vars, coords=coords, attrs={}))
+    samples_ds = samples_ds.rename({"target_pr": "pred_pr"})
     return samples_ds
 
 def load_config(config_name, sde):
@@ -134,37 +130,36 @@ def load_config(config_name, sde):
     return module.get_config()
 
 @app.command()
-def main(output_dirpath: Path, data_dirpath: Path, dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), batch_size: int = 8, num_samples: int = 3):
-    workdir = os.path.join(os.getenv("DERIVED_DATA"), "score-sde", "workdirs", sde.value.lower(), config_name, data_dirpath.name)
+def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = 32, batch_size: int = 8, num_samples: int = 3):
     config = load_config(config_name, sde)
     config.training.batch_size = batch_size
     config.eval.batch_size = batch_size
-    config.data.dataset_name = data_dirpath.name
+    config.data.dataset_name = dataset
+    config.data.image_size = image_size
+
+    output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"
 
     ckpt_filename = os.path.join(workdir, "checkpoints", f"checkpoint_{checkpoint_id}.pth")
 
     score_model, sampling_fn = load_model(config, sde, ckpt_filename)
 
     # Data
-    # data_dirpath = os.path.join(os.getenv('DERIVED_DATA'), 'nc-datasets', '2.2km-coarsened-2x_london_pr_random')
-    xr_data_train = xr.load_dataset(os.path.join(data_dirpath, 'train.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
-    xr_data_eval = xr.load_dataset(os.path.join(data_dirpath, f'{dataset_split}.nc')).isel(grid_longitude=slice(0, config.data.image_size),grid_latitude=slice(0, config.data.image_size))
+    _, eval_dl, _ = datasets.get_dataset(config, evaluation=True, split=dataset_split)
 
-    with open(os.path.join(data_dirpath, 'ds-config.yml'), 'r') as f:
-        ds_config = yaml.safe_load(f)
+    xr_data_eval  = eval_dl.dataset.ds
 
-    variables = [ pred_meta["variable"] for pred_meta in ds_config["predictors"] ]
+    _, target_transform, _ = datasets.get_transform(config)
 
-    norm_factors = { variable: xr_data_train[variable].max().values.item() for variable in variables }
-    target_norm_factors = {"target_pr": xr_data_train["target_pr"].max().values.item()}
-
-    # eval_dl = DataLoader(XRDataset(xr_data_eval, variables=["pr"]), batch_size=config.training.batch_size)
-    _, eval_dl, _ = datasets.get_dataset(config, evaluation=True)
-
-    eval_cond_xr = xr_data_eval.isel(time=slice(0,batch_size))
     for sample_id in range(num_samples):
         typer.echo(f"Sample run {sample_id}...")
-        preds = [generate_predictions(sampling_fn, score_model, config, xr_data_eval.isel(time=slice(i, i+config.eval.batch_size)), norm_factors, target_norm_factors, sample_id) for i in range(0, len(xr_data_eval.time), config.eval.batch_size)]
+        cf_data_vars = {key: xr_data_eval.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds", "forecast_period_bnds"]}
+        preds = []
+        for batch_num, (cond_batch, _) in enumerate(eval_dl):
+            typer.echo(f"Working on batch {batch_num}")
+            time_idx_start = batch_num*eval_dl.batch_size
+            coords = xr_data_eval.isel(time=slice(time_idx_start, time_idx_start+len(cond_batch))).coords
+
+            preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id))
 
         ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
 
