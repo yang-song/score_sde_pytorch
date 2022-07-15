@@ -152,7 +152,7 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
 
     for sample_id in range(num_samples):
         typer.echo(f"Sample run {sample_id}...")
-        cf_data_vars = {key: xr_data_eval.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds", "forecast_period_bnds"]}
+        cf_data_vars = {key: xr_data_eval.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds"]}
         preds = []
         for batch_num, (cond_batch, _) in enumerate(eval_dl):
             typer.echo(f"Working on batch {batch_num}")
