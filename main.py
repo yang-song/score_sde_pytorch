@@ -21,7 +21,6 @@ from absl import flags
 from ml_collections.config_flags import config_flags
 import logging
 import os
-import tensorflow as tf
 
 FLAGS = flags.FLAGS
 
@@ -37,7 +36,7 @@ flags.mark_flags_as_required(["workdir", "config", "mode"])
 def main(argv):
   if FLAGS.mode == "train":
     # Create the working directory
-    tf.io.gfile.makedirs(FLAGS.workdir)
+    os.makedirs(FLAGS.workdir, exist_ok=True)
     # Set logger so that it outputs to both console and file
     # Make logging work for both disk and Google Cloud Storage
     gfile_stream = open(os.path.join(FLAGS.workdir, 'stdout.txt'), 'w')
