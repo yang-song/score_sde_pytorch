@@ -98,7 +98,7 @@ def train(config, workdir):
   # Intermediate checkpoints to resume training after pre-emption in cloud environments
   checkpoint_meta_dir = os.path.join(workdir, "checkpoints-meta", "checkpoint.pth")
   os.makedirs(checkpoint_dir, exist_ok=True)
-  os.makedirs(os.path.dirname(checkpoint_meta_dir))
+  os.makedirs(os.path.dirname(checkpoint_meta_dir), exist_ok=True)
   # Resume training when intermediate checkpoints are detected
   state = restore_checkpoint(checkpoint_meta_dir, state, config.device)
   initial_step = int(state['step'])
