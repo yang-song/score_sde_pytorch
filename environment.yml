@@ -115,6 +115,7 @@ dependencies:
   - netcdf4=1.5.7=py38h0a24e14_0
   - notebook=6.4.6=py38h06a4308_0
   - olefile=0.46=pyh9f0ad1d_1
+  - openjpeg=2.4.0=hb52868f_1
   - openssl=1.1.1m=h7f8727e_0
   - packaging=21.3=pyhd3eb1b0_0
   - pandas=1.2.5=py38h1abd341_0
@@ -166,6 +167,7 @@ dependencies:
   - tornado=6.1=py38h27cfd23_0
   - traitlets=5.1.1=pyhd3eb1b0_0
   - typer=0.4.0=pyhd8ed1ab_0
+  - typing_extensions=4.2.0=pyha770c72_1
   - urllib3=1.26.7=pyhd3eb1b0_0
   - wcwidth=0.2.5=pyhd3eb1b0_0
   - webencodings=0.5.1=py38_1
@@ -203,7 +205,7 @@ dependencies:
     - oauthlib==3.1.1
     - opt-einsum==3.3.0
     - pillow==9.0.0
-    - pip==21.3.1
+    - pip==22.1.2
     - promise==2.3
     - protobuf==3.19.3
     - pyasn1==0.4.8
