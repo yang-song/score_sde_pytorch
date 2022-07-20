@@ -130,12 +130,14 @@ def load_config(config_name, sde):
     return module.get_config()
 
 @app.command()
-def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = 32, batch_size: int = 8, num_samples: int = 3):
+def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = None, batch_size: int = None, num_samples: int = 3):
     config = load_config(config_name, sde)
-    config.training.batch_size = batch_size
-    config.eval.batch_size = batch_size
     config.data.dataset_name = dataset
-    config.data.image_size = image_size
+    if image_size is not None:
+        config.data.image_size = image_size
+    if batch_size is not None:
+        config.training.batch_size = batch_size
+        config.eval.batch_size = batch_size
 
     output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"
 
@@ -162,7 +164,6 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
             preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id))
 
         ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
-
 
         output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")
