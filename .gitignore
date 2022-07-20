@@ -17,5 +17,8 @@ dist/
 # Tests
 .pytest_cache/
 
+# Jupyter
+.ipynb_checkpoints/
+
 # Other
 *.DS_Store
