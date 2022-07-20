@@ -87,7 +87,7 @@ def load_model(config, sde, ckpt_filename):
     ema.copy_to(score_model.parameters())
 
     # Sampling
-    sampling_shape = (config.training.batch_size, config.data.num_channels,
+    sampling_shape = (config.eval.batch_size, config.data.num_channels,
                           config.data.image_size, config.data.image_size)
     sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
 
@@ -136,7 +136,6 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
     if image_size is not None:
         config.data.image_size = image_size
     if batch_size is not None:
-        config.training.batch_size = batch_size
         config.eval.batch_size = batch_size
 
     output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"
