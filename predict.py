@@ -163,7 +163,7 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
 
         output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")
-        os.makedirs(output_filepath.parent, exist_ok=True)
+        os.makedirs(output_filepath.parent)
         ds.to_netcdf(output_filepath)
 
 
