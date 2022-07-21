@@ -1,0 +1,12 @@
+#!/usr/bin/bash
+# run tensorboard on a login node on a random port
+
+set -euo pipefail
+
+run_name=$1
+host=${2:-bp}
+
+port=$(shuf -i 6000-9999 -n 1)
+echo "Using port ${port} on ${host}"
+
+ssh -t -L ${port}:localhost:${port} ${host} "~/miniconda3/envs/cuda-downscaling/bin/tensorboard --port=${port} --logdir=/user/work/vf20964/score-sde/workdirs/subvpsde/xarray_cncsnpp_continuous/${run_name}/tensorboard"

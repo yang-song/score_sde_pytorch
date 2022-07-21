@@ -6,7 +6,7 @@ def get_default_configs():
   config = ml_collections.ConfigDict()
   # training
   config.training = training = ml_collections.ConfigDict()
-  config.training.batch_size = 64#128
+  config.training.batch_size = 16#128
   training.n_iters = 1300001
   training.snapshot_freq = 50000
   training.log_freq = 50
@@ -30,7 +30,7 @@ def get_default_configs():
   config.eval = evaluate = ml_collections.ConfigDict()
   evaluate.begin_ckpt = 9
   evaluate.end_ckpt = 26
-  evaluate.batch_size = 1024
+  evaluate.batch_size = 128
   evaluate.enable_sampling = False
   evaluate.num_samples = 50000
   evaluate.enable_loss = True
@@ -41,7 +41,7 @@ def get_default_configs():
   config.data = data = ml_collections.ConfigDict()
   data.dataset = 'XR'
   data.dataset_name = '2.2km-coarsened-8x_london_vorticity850_random'
-  data.image_size = 32
+  data.image_size = 64
   data.random_flip = False
   data.centered = False
   data.uniform_dequantization = False

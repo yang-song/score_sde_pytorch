@@ -1,0 +1,6 @@
+#!/bin/sh
+
+set -euo pipefail
+
+# start Jupyter running on Blue Pebble for notebooks in this project, accessible over SSH tunnel
+bp_jupyter -g 1 -q cnu,gpu -m 16 -t 2 --condaenv cuda-downscaling --workdir /user/home/vf20964/code/score_sde_pytorch --module-list default

@@ -87,7 +87,7 @@ def load_model(config, sde, ckpt_filename):
     ema.copy_to(score_model.parameters())
 
     # Sampling
-    sampling_shape = (config.training.batch_size, config.data.num_channels,
+    sampling_shape = (config.eval.batch_size, config.data.num_channels,
                           config.data.image_size, config.data.image_size)
     sampling_fn = sampling.get_sampling_fn(config, sde, sampling_shape, inverse_scaler, sampling_eps)
 
@@ -130,12 +130,13 @@ def load_config(config_name, sde):
     return module.get_config()
 
 @app.command()
-def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = 32, batch_size: int = 8, num_samples: int = 3):
+def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = None, batch_size: int = None, num_samples: int = 3):
     config = load_config(config_name, sde)
-    config.training.batch_size = batch_size
-    config.eval.batch_size = batch_size
     config.data.dataset_name = dataset
-    config.data.image_size = image_size
+    if image_size is not None:
+        config.data.image_size = image_size
+    if batch_size is not None:
+        config.eval.batch_size = batch_size
 
     output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"
 
@@ -152,7 +153,7 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
 
     for sample_id in range(num_samples):
         typer.echo(f"Sample run {sample_id}...")
-        cf_data_vars = {key: xr_data_eval.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds", "forecast_period_bnds"]}
+        cf_data_vars = {key: xr_data_eval.data_vars[key] for key in ["rotated_latitude_longitude", "time_bnds", "grid_latitude_bnds", "grid_longitude_bnds"]}
         preds = []
         for batch_num, (cond_batch, _) in enumerate(eval_dl):
             typer.echo(f"Working on batch {batch_num}")
@@ -162,7 +163,6 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
             preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id))
 
         ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
-
 
         output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")

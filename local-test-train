@@ -2,10 +2,13 @@
 
 set -euo pipefail
 
-rm -rf output/test
-
+workdir="output/test"
 dataset="2.2km-coarsened-8x_london_vorticity850_random-sample"
 dataset="2.2km-coarsened-gcm-2.2km_london_vorticity850_random-sample"
-config="configs/subvp/xarray_cunet_continuous.py"
+config_name="xarray_cunet_continuous"
+config_path="configs/subvp/${config_name}.py"
 
-python main.py --workdir output/test --config ${config} --mode train --config.data.dataset_name=${dataset} --config.training.snapshot_freq=5 --config.training.eval_freq=2 --config.training.log_freq=1 --config.training.n_iters=15
+rm -rf ${workdir}
+python main.py --workdir ${workdir} --config ${config_path} --mode train --config.data.dataset_name=${dataset} --config.training.snapshot_freq=5 --config.training.eval_freq=2 --config.training.log_freq=1 --config.training.n_iters=15
+
+python predict.py --dataset ${dataset} --config-name ${config_name} --checkpoint-id 2 ${workdir} --batch-size 1024
