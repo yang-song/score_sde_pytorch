@@ -135,7 +135,7 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
     if batch_size is not None:
         config.eval.batch_size = batch_size
 
-    output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}/{dataset}/{dataset_split}"
+    output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"/dataset/dataset_split
     os.makedirs(output_filepath.parent)
 
     ckpt_filename = os.path.join(workdir, "checkpoints", f"checkpoint_{checkpoint_id}.pth")
