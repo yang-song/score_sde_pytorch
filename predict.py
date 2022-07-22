@@ -136,6 +136,7 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
         config.eval.batch_size = batch_size
 
     output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}/{dataset}/{dataset_split}"
+    os.makedirs(output_filepath.parent)
 
     ckpt_filename = os.path.join(workdir, "checkpoints", f"checkpoint_{checkpoint_id}.pth")
 
@@ -163,7 +164,6 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
 
         output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")
-        os.makedirs(output_filepath.parent)
         ds.to_netcdf(output_filepath)
 
 
