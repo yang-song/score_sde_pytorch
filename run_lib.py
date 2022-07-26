@@ -41,6 +41,9 @@ from torch.utils import tensorboard
 from torchvision.utils import make_grid, save_image
 from utils import save_checkpoint, restore_checkpoint
 
+import wandb
+wandb.init(project="DSM-alpha")
+
 FLAGS = flags.FLAGS
 
 
@@ -52,6 +55,10 @@ def train(config, workdir):
     workdir: Working directory for checkpoints and TF summaries. If this
       contains checkpoint training will be resumed from the latest checkpoint.
   """
+  try:
+    wandb.config.sigma = float(os.environ.get("LOSS_SIGMA"))
+  except:
+    print("Could not read LOSS_SIGMA environment variable for WANDB logging.")
 
   # Create directories for experimental logs
   sample_dir = os.path.join(workdir, "samples")
@@ -129,6 +136,7 @@ def train(config, workdir):
     batch = scaler(batch)
     # Execute one training step
     loss = train_step_fn(state, batch)
+    wandb.log({"loss":loss.item()})
     if step % config.training.log_freq == 0:
       logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
       writer.add_scalar("training_loss", loss, step)

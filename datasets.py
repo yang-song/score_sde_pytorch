@@ -79,6 +79,8 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
   Returns:
     train_ds, eval_ds, dataset_builder.
   """
+
+
   # Compute batch size for this worker.
   batch_size = config.training.batch_size if not evaluation else config.eval.batch_size
   if batch_size % jax.device_count() != 0:
@@ -169,6 +171,8 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
       if config.data.random_flip and not evaluation:
         img = tf.image.random_flip_left_right(img)
       if uniform_dequantization:
+        #print(uniform_dequantization, "Uniform deq. state")
+        #img = (tf.random.normal(img.shape, stddev=0.0001*255., dtype=tf.float32) + img * 255.) / 256.
         img = (tf.random.uniform(img.shape, dtype=tf.float32) + img * 255.) / 256.
 
       return dict(image=img, label=d.get('label', None))

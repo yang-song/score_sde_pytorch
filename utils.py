@@ -26,4 +26,5 @@ def save_checkpoint(ckpt_dir, state):
     'ema': state['ema'].state_dict(),
     'step': state['step']
   }
-  torch.save(saved_state, ckpt_dir)
+  print("Checkpoint saving disabled in utils.py")
+  #torch.save(saved_state, ckpt_dir)
