@@ -175,6 +175,7 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
   return loss_fn
 
 
+
 def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
   """Create a loss function for training with arbirary SDEs.
   Args:
@@ -203,7 +204,14 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     if not train:
       return torch.zeros(1)
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
-    t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
+
+    
+    t, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
+    print(T_idx)
+    t = t * (sde.T - eps) + eps
+
+
+    #t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
     z = torch.randn_like(batch)
     
     with torch.no_grad():
@@ -233,19 +241,29 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 
     loss = loss1 + loss2
 
-    loss = loss.clamp(-1e4, 1e4)
-    loss = loss * torch.exp(-2.5*(1-t))
+    #c = 1e4
+    #loss = loss.clamp(-c, c)
+    #loss = loss * torch.exp(-2.5*(1-t))
+    #loss = loss.clamp(-2000, 2000)
+    sde.importance_sampler.add(tee=T_idx, ell=loss)
+    normalization, nans = sde.importance_sampler.pluck_pt(T_idx)
+    
+    loss = loss / normalization.to(batch.device)
     
     #write loss vs. t to disk:
-    data = np.stack((t.cpu(), loss.cpu().detach()), axis=1)
-    np.save(f"loss_vs_t_dump/{uuid.uuid4()}_data", data)
+    if not(nans) and not(os.path.exists("loss_vs_t_dump/disable")):
+      data = np.stack((t.cpu(), loss.cpu().detach()), axis=1)
+      np.save(f"loss_vs_t_dump/{uuid.uuid4()}_data", data)
+      np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
 
 
     #lambda_t = 1.0 / (torch.norm(loss2, dim=-1) + torch.norm(loss1, dim=-1))
     #lambda_t = 1.0 / t #(torch.norm(loss2, dim=-1) + torch.norm(loss1, dim=-1))
     #loss = loss * lambda_t
-
-    return loss.mean()
+    if nans:
+      return loss.mean()*0.0
+    else:
+      return loss.mean()
 
   return loss_fn
 

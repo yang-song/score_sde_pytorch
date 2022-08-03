@@ -41,8 +41,8 @@ from torch.utils import tensorboard
 from torchvision.utils import make_grid, save_image
 from utils import save_checkpoint, restore_checkpoint
 
-import wandb
-wandb.init(project="DSM-alpha")
+#import wandb
+#wandb.init(project="DSM-alpha")
 
 FLAGS = flags.FLAGS
 
@@ -136,7 +136,7 @@ def train(config, workdir):
     batch = scaler(batch)
     # Execute one training step
     loss = train_step_fn(state, batch)
-    wandb.log({"loss":loss.item()})
+    #wandb.log({"loss":loss.item()})
     if step % config.training.log_freq == 0:
       logging.info("step: %d, training_loss: %.5e" % (step, loss.item()))
       writer.add_scalar("training_loss", loss, step)

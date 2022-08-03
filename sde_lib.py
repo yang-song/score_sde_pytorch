@@ -2,7 +2,75 @@
 import abc
 import torch
 import numpy as np
+import logging
 
+class importance_sampler():
+  def __init__(self, N, h=10):
+    """Construct a loss scaler for importance sampling
+     
+    Args:
+      N: number of discretization time steps.
+      h: number of historic steps to average over
+    """
+    
+    self.N = N
+    self.history = np.ones((N, h)) + np.nan
+    self.history_2 = np.ones((N, h)) + np.nan
+    self.pt = np.ones(N, dtype=np.float) / N
+
+  def add(self, tee, ell):
+    """
+       tee ~ [batch_size]
+       ell ~ [batch_size]
+    """
+    tee = tee.cpu().numpy()
+    ell = ell.cpu().detach().numpy() 
+    for t, L in zip(tee, ell):
+      t=int(t)
+      #self.history[t, :] = np.roll(self.history[t,:], 1)
+      self.history_2[t, :] = np.roll(self.history_2[t,:], 1)
+      #self.history[t, 0] = L
+      self.history_2[t, 0] = L**2
+    
+    self.update_pt()
+
+  def update_pt(self):
+    #only update pt if we've drawn h samples for every t bucket:
+    # i.e. the history_2 array contains no Nans
+    if np.isnan(self.history_2).any():
+      nnans = np.sum(np.isnan(self.history_2))
+      print(f"Still {nnans} NaNs in history_2 array")
+      pass
+    else:
+      pt = np.sqrt(np.mean(self.history_2, axis=1))
+      pt = pt / np.sum(pt)
+      self.pt[:] = pt[:]
+
+  def sample_t(self, batch_size, device):
+    
+    if np.isnan(self.history_2).any():
+      mean = np.mean(self.history_2, axis=1)  #will be nan
+      nan_idx = np.where(np.isnan(mean))[0]
+      t_idx = torch.Tensor(np.random.choice(nan_idx, batch_size, replace=True)).to(device)
+    else:
+
+      #t_idx = np.random.choice(self.N, p=self.pt, replace=True)
+      t_idx = torch.multinomial(input=torch.Tensor(self.pt), num_samples=batch_size, replacement=True).to(device)
+
+    t = t_idx / self.N
+    return t, t_idx  #return a sample from [0, 1), weighted by p_t, and original bucket as well
+
+  def pluck_pt(self, t):
+    if np.isnan(self.history_2).any():
+      nans = True
+    else:
+      nans = False
+    
+    t_ = t.cpu().numpy().astype(int)
+    return torch.tensor(self.pt[t_]), nans
+
+
+  
 
 class SDE(abc.ABC):
   """SDE abstract class. Functions are designed for a mini-batch of inputs."""
@@ -15,6 +83,8 @@ class SDE(abc.ABC):
     """
     super().__init__()
     self.N = N
+    self.importance_sampler = importance_sampler(self.N)
+
 
   @property
   @abc.abstractmethod
@@ -48,6 +118,9 @@ class SDE(abc.ABC):
       log probability density
     """
     pass
+
+  
+
 
   def discretize(self, x, t):
     """Discretize the SDE in the form: x_{i+1} = x_i + f_i(x_i) + G_i z_i.
