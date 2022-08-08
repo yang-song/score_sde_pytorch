@@ -1,0 +1,20 @@
+#!/bin/bash
+# Sync samples from a model run on bluepebble to local filesystem
+
+set -euo pipefail
+
+run_name=$1
+checkpoint=$2
+dataset=$3
+split="val"
+bp_host=${4:-"bp"}
+
+samples_path="score-sde/workdirs/subvpsde/xarray_cncsnpp_continuous/${run_name}/samples/checkpoint-${checkpoint}/${dataset}/${split}/"
+
+bp_path="/user/work/vf20964/${samples_path}"
+local_path="${DERIVED_DATA}/${samples_path}"
+
+mkdir -p ${local_path}
+
+set -x
+rsync -avz ${bp_host}:${bp_path} ${local_path}
