@@ -1,15 +1,12 @@
-import typer
-
 from enum import Enum
-from pathlib import Path
 import importlib
 import os
+
+from pathlib import Path
 import re
-import yaml
-# import functools
-# import itertools
-import torch
-from torch.utils.data import DataLoader
+
+from knockknock import slack_sender
+import typer
 import xarray as xr
 
 from losses import get_optimizer
@@ -127,6 +124,7 @@ def load_config(config_name, sde):
     return module.get_config()
 
 @app.command()
+@slack_sender(webhook_url=os.getenv("KK_SLACK_WH_URL"), channel="general")
 def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = None, batch_size: int = None, num_samples: int = 3):
     config = load_config(config_name, sde)
     config.data.dataset_name = dataset
