@@ -22,6 +22,8 @@ from ml_collections.config_flags import config_flags
 import logging
 import os
 
+from knockknock import slack_sender
+
 FLAGS = flags.FLAGS
 
 config_flags.DEFINE_config_file(
@@ -32,7 +34,7 @@ flags.DEFINE_string("eval_folder", "eval",
                     "The folder name for storing evaluation results")
 flags.mark_flags_as_required(["workdir", "config", "mode"])
 
-
+@slack_sender(webhook_url=os.getenv("KK_SLACK_WH_URL"), channel="general")
 def main(argv):
   if FLAGS.mode == "train":
     # Create the working directory
