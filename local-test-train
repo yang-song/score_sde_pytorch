@@ -7,8 +7,8 @@ dataset="2.2km-coarsened-gcm-2.2km_london_vorticity850_random-sample"
 config_name="xarray_cunet_continuous"
 config_path="configs/subvp/${config_name}.py"
 
-# rm -rf ${workdir}
-# python main.py --workdir ${workdir} --config ${config_path} --mode train --config.data.dataset_name=${dataset} --config.training.snapshot_freq=5 --config.training.eval_freq=2 --config.training.log_freq=1 --config.training.n_iters=15 --config.model.map_features=1
+rm -rf ${workdir}
+python main.py --workdir ${workdir} --config ${config_path} --mode train --config.data.dataset_name=${dataset} --config.training.snapshot_freq=5 --config.training.eval_freq=2 --config.training.log_freq=1 --config.training.n_iters=15 --config.model.map_features=1 --config.data.image_size=16 --config.training.batch_size=2
 
 checkpoint=2
 
