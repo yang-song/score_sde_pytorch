@@ -40,10 +40,15 @@ class ScoreNet(nn.Module):
     super().__init__()
     self.config = config
     marginal_prob_std=None
-    input_channels=config.data.num_channels+config.data.num_conditioning_channels
+    input_channels=config.data.num_channels+config.data.num_conditioning_channels+config.model.map_features
     output_channels=config.data.num_channels
     channels=[32, 64, 128, 256]
     embed_dim=256
+
+    # include a learnable feature map
+    if config.model.map_features > 0:
+      self.map = nn.Parameter(torch.zeros(config.model.map_features, config.data.image_size, config.data.image_size))
+
     # Gaussian random feature embedding layer for time
     self.embed = nn.Sequential(GaussianFourierProjection(embed_dim=embed_dim),
          nn.Linear(embed_dim, embed_dim))
@@ -80,6 +85,9 @@ class ScoreNet(nn.Module):
   def forward(self, x, cond, t):
     # combine the modelled data and the conditioning inputs
     x = torch.cat([x, cond], dim=1)
+    # add map features to input
+    if self.config.model.map_features > 0:
+      x = torch.cat([x, self.map.broadcast_to((x.shape[0], *self.map.shape))], dim=1)
     # Obtain the Gaussian random feature embedding for t
     embed = self.act(self.embed(t))
     # Encoding path
