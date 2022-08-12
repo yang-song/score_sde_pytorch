@@ -67,7 +67,7 @@ class cNCSNpp(nn.Module):
 
     # include a learnable feature map
     if config.model.map_features > 0:
-      self.map = nn.Parameter(torch.zeros(config.data.image_size, config.data.image_size, config.model.map_features))
+      self.map = nn.Parameter(torch.zeros(config.model.map_features, config.data.image_size, config.data.image_size))
 
     modules = []
     # timestep/noise_level embedding; only for continuous training
