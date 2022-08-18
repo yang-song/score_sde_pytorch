@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from knockknock import slack_sender
+import shortuuid
 import typer
 import xarray as xr
 
@@ -93,19 +94,17 @@ def generate_samples(sampling_fn, score_model, config, cond_batch):
     samples = sampling_fn(score_model, cond_batch)[0]
     # drop the feature channel dimension (only have target pr as output)
     samples = samples.squeeze(dim=1)
-    # add a dimension for sample_id
-    samples = samples.unsqueeze(dim=0)
     # extract numpy array
     samples = samples.cpu().numpy()
     return samples
 
-def generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id):
+def generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars):
     print("making predictions", flush=True)
     samples = generate_samples(sampling_fn, score_model, config, cond_batch)
 
-    coords = {**dict(coords), "sample_id": ("sample_id", [sample_id])}
+    coords = {**dict(coords)}
 
-    pred_pr_dims=["sample_id", "time", "grid_latitude", "grid_longitude"]
+    pred_pr_dims=["time", "grid_latitude", "grid_longitude"]
     pred_pr_attrs = {"grid_mapping": "rotated_latitude_longitude", "standard_name": "pred_pr", "units": "kg m-2 s-1"}
     pred_pr_var = (pred_pr_dims, samples, pred_pr_attrs)
 
@@ -158,11 +157,11 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
             time_idx_start = batch_num*eval_dl.batch_size
             coords = xr_data_eval.isel(time=slice(time_idx_start, time_idx_start+len(cond_batch))).coords
 
-            preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id))
+            preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars))
 
         ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
 
-        output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
+        output_filepath = output_dirpath/f"predictions-{shortuuid.uuid()}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")
         ds.to_netcdf(output_filepath)
 
