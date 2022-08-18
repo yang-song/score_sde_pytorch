@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from knockknock import slack_sender
+import shortuuid
 import typer
 import xarray as xr
 
@@ -93,19 +94,17 @@ def generate_samples(sampling_fn, score_model, config, cond_batch):
     samples = sampling_fn(score_model, cond_batch)[0]
     # drop the feature channel dimension (only have target pr as output)
     samples = samples.squeeze(dim=1)
-    # add a dimension for sample_id
-    samples = samples.unsqueeze(dim=0)
     # extract numpy array
     samples = samples.cpu().numpy()
     return samples
 
-def generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id):
+def generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars):
     print("making predictions", flush=True)
     samples = generate_samples(sampling_fn, score_model, config, cond_batch)
 
-    coords = {**dict(coords), "sample_id": ("sample_id", [sample_id])}
+    coords = {**dict(coords)}
 
-    pred_pr_dims=["sample_id", "time", "grid_latitude", "grid_longitude"]
+    pred_pr_dims=["time", "grid_latitude", "grid_longitude"]
     pred_pr_attrs = {"grid_mapping": "rotated_latitude_longitude", "standard_name": "pred_pr", "units": "kg m-2 s-1"}
     pred_pr_var = (pred_pr_dims, samples, pred_pr_attrs)
 
@@ -125,16 +124,18 @@ def load_config(config_name, sde):
 
 @app.command()
 @slack_sender(webhook_url=os.getenv("KK_SLACK_WH_URL"), channel="general")
-def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = None, batch_size: int = None, num_samples: int = 3):
+def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = None, batch_size: int = None, num_samples: int = 3, map_features: int = None):
     config = load_config(config_name, sde)
     config.data.dataset_name = dataset
+    if map_features is not None:
+        config.model.map_features = map_features
     if image_size is not None:
         config.data.image_size = image_size
     if batch_size is not None:
         config.eval.batch_size = batch_size
 
     output_dirpath = workdir/"samples"/f"checkpoint-{checkpoint_id}"/dataset/dataset_split
-    os.makedirs(output_dirpath)
+    os.makedirs(output_dirpath, exist_ok=True)
 
     ckpt_filename = os.path.join(workdir, "checkpoints", f"checkpoint_{checkpoint_id}.pth")
 
@@ -156,11 +157,11 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
             time_idx_start = batch_num*eval_dl.batch_size
             coords = xr_data_eval.isel(time=slice(time_idx_start, time_idx_start+len(cond_batch))).coords
 
-            preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars, sample_id))
+            preds.append(generate_predictions(sampling_fn, score_model, config, cond_batch, target_transform, coords, cf_data_vars))
 
         ds = xr.combine_by_coords(preds, compat='no_conflicts', combine_attrs="drop_conflicts", coords="all", join="inner", data_vars="all")
 
-        output_filepath = output_dirpath/f"predictions-{sample_id}.nc"
+        output_filepath = output_dirpath/f"predictions-{shortuuid.uuid()}.nc"
         typer.echo(f"Saving samples to {output_filepath}...")
         ds.to_netcdf(output_filepath)
 

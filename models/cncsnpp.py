@@ -65,6 +65,10 @@ class cNCSNpp(nn.Module):
     combine_method = config.model.progressive_combine.lower()
     combiner = functools.partial(Combine, method=combine_method)
 
+    # include a learnable feature map
+    if config.model.map_features > 0:
+      self.map = nn.Parameter(torch.zeros(config.model.map_features, config.data.image_size, config.data.image_size))
+
     modules = []
     # timestep/noise_level embedding; only for continuous training
     if embedding_type == 'fourier':
@@ -135,7 +139,7 @@ class cNCSNpp(nn.Module):
 
     # Downsampling block
 
-    channels = config.data.num_channels + config.data.num_conditioning_channels
+    channels = config.data.num_channels + config.data.num_conditioning_channels + config.model.map_features
     if progressive_input != 'none':
       input_pyramid_ch = channels
 
@@ -235,6 +239,9 @@ class cNCSNpp(nn.Module):
   def forward(self, x, cond, time_cond):
     # combine the modelled data and the conditioning inputs
     x = torch.cat([x, cond], dim=1)
+    # add map features to input
+    if self.config.model.map_features > 0:
+      x = torch.cat([x, self.map.broadcast_to((x.shape[0], *self.map.shape))], dim=1)
     # timestep/noise_level embedding; only for continuous training
     modules = self.all_modules
     m_idx = 0
