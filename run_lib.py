@@ -155,7 +155,12 @@ def train(config, workdir):
       writer.add_scalar("eval_loss", eval_loss.item(), step)
 
     # Save a checkpoint periodically and generate samples if needed
-    if step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps:
+    if (step != 0 and step % config.training.snapshot_freq == 0 or step == num_train_steps) or \
+      os.path.exists("./generate_samples"):
+      try:
+        os.remove("./generate_samples")
+      except:
+        pass
       # Save the checkpoint.
       save_step = step // config.training.snapshot_freq
       save_checkpoint(os.path.join(checkpoint_dir, f'checkpoint_{save_step}.pth'), state)

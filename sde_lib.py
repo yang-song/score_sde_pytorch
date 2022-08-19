@@ -1,8 +1,11 @@
 """Abstract SDE classes, Reverse SDE, and VE/VP SDEs."""
 import abc
+from re import I
 import torch
 import numpy as np
 import logging
+import scipy
+import h5py
 
 class importance_sampler():
   def __init__(self, N, h=10):
@@ -14,10 +17,16 @@ class importance_sampler():
     """
     
     self.N = N
-    self.history = np.ones((N, h)) + np.nan
     self.history_2 = np.ones((N, h)) + np.nan
     self.pt = np.ones(N, dtype=np.float) / N
+    self.t = np.linspace(0,1,num=self.N)
 
+  def dump_state(self):
+    with h5py.File("importance_sampler_state.h5", 'w') as F:
+      F.create_dataset("history2", data=self.history_2)
+      F.create_dataset("pt", self.pt)
+      F.create_dataset(self.t)
+  
   def add(self, tee, ell):
     """
        tee ~ [batch_size]
@@ -27,50 +36,61 @@ class importance_sampler():
     ell = ell.cpu().detach().numpy() 
     for t, L in zip(tee, ell):
       t=int(t)
-      #self.history[t, :] = np.roll(self.history[t,:], 1)
       self.history_2[t, :] = np.roll(self.history_2[t,:], 1)
-      #self.history[t, 0] = L
       self.history_2[t, 0] = L**2
     
     self.update_pt()
 
   def update_pt(self):
-    #only update pt if we've drawn h samples for every t bucket:
-    # i.e. the history_2 array contains no Nans
-    if np.isnan(self.history_2).any():
-      nnans = np.sum(np.isnan(self.history_2))
-      print(f"Still {nnans} NaNs in history_2 array")
-      pass
-    else:
-      pt = np.sqrt(np.mean(self.history_2, axis=1))
-      pt = pt / np.sum(pt)
-      self.pt[:] = pt[:]
+    pt = np.sqrt(np.nanmedian(self.history_2, axis=1))
+    if not np.isnan(pt).any():
+      self.pt = pt / np.sum(pt)
 
   def sample_t(self, batch_size, device):
-    
     if np.isnan(self.history_2).any():
-      mean = np.mean(self.history_2, axis=1)  #will be nan
+      mean = np.mean(self.history_2, axis=1)  #will be nan in columns that have Nans
       nan_idx = np.where(np.isnan(mean))[0]
+      print(f"There are still NaNs in the history buffer in {len(nan_idx)} columns ({np.isnan(self.history_2).sum()} NaN elements)")
       t_idx = torch.Tensor(np.random.choice(nan_idx, batch_size, replace=True)).to(device)
     else:
-
-      #t_idx = np.random.choice(self.N, p=self.pt, replace=True)
       t_idx = torch.multinomial(input=torch.Tensor(self.pt), num_samples=batch_size, replacement=True).to(device)
+
+    slice = len(t_idx) // 2
+    t_idx[0:slice] = np.random.randint(0,self.N, slice)
 
     t = t_idx / self.N
     return t, t_idx  #return a sample from [0, 1), weighted by p_t, and original bucket as well
 
-  def pluck_pt(self, t):
+
+  def get_normalization(self, T_idx):
     if np.isnan(self.history_2).any():
-      nans = True
-    else:
-      nans = False
+      return torch.ones(len(T_idx)), 0.0
     
-    t_ = t.cpu().numpy().astype(int)
-    return torch.tensor(self.pt[t_]), nans
+    t_ = T_idx.cpu().numpy().astype(int)
+    ret_ = torch.tensor(self.pt[t_])
+
+    return ret_, 1.0
 
 
-  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 class SDE(abc.ABC):
   """SDE abstract class. Functions are designed for a mini-batch of inputs."""
@@ -83,7 +103,8 @@ class SDE(abc.ABC):
     """
     super().__init__()
     self.N = N
-    self.importance_sampler = importance_sampler(self.N)
+    #self.importance_sampler = fit_importance_sampler(self.N)
+    self.importance_sampler = importance_sampler(self.N, h=10)
 
 
   @property
@@ -325,3 +346,131 @@ class VESDE(SDE):
     f = torch.zeros_like(x)
     G = torch.sqrt(sigma ** 2 - adjacent_sigma ** 2)
     return f, G
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class fit_importance_sampler():
+  def __init__(self, N):
+
+    self.N = N
+    self.sampler = importance_sampler(N=N, h=25)
+
+    self.guess = [1.0, 6.0, -10.0]  #empirically obtained
+    self.params = [i for i in self.guess]
+
+    self.update_freq = 10
+    self.update_count = 0
+
+    self.update_pt()
+
+  def template(self, t, a, b, c):
+    return a*np.exp(b*np.exp(c*t))
+  
+  def update_pt(self):
+    print("Tuning importance sampler")
+    if self.sampler.counter < 4000:
+      print(f"  x-> skipping because we have only obtained {self.sampler.counter} samples so far")
+      self.pt = self.template(np.linspace(0, 1.0, num=self.N), *self.guess)
+      #self.pt = np.ones(self.N) / self.N
+      return
+    else:
+      if self.update_count == self.update_freq:
+        self.update_count = 0
+        try:
+          popt, _ = scipy.optimize.curve_fit(self.template, self.sampler.t, self.sampler.pt, p0=self.guess)
+          self.params = popt
+        except RuntimeError:
+          print("Failure to fit")
+
+    print(f" --> Importance sampler parameters: {self.params}")
+    pt = self.template(np.linspace(0,1.0,num=self.N), *self.params)
+    self.pt = pt/np.sum(pt)
+    
+    debug=True 
+    if debug:
+      with h5py.File("debug_pt.h5","w") as F:
+        print(self.sampler.t.shape)
+        F.create_dataset("t", data=self.sampler.t)
+        F.create_dataset("pt", data=self.sampler.pt)
+        F.create_dataset("params", data=self.params)
+        F.create_dataset("pt_fit", data=self.pt)
+
+   
+  def print_status(self):
+    pass
+
+  def add(self, tee, ell):
+    """
+       tee ~ [batch_size]
+       ell ~ [batch_size]
+    """
+
+    self.sampler.add(tee, ell)
+    
+    self.update_pt()
+    self.print_status()
+  
+  def sample_t(self, batch_size, device):
+    t_idx = torch.multinomial(input=torch.Tensor(self.pt), num_samples=batch_size, replacement=True).to(device)
+    
+    
+    t_idx[0] = np.random.randint(0,self.N)
+
+    t = t_idx / self.N
+    return t, t_idx  #return a sample from [0, 1), weighted by p_t, and original bucket as well
+
+  def pluck_pt(self, t):
+    nans = False #for compatibility
+    t_ = t.cpu().numpy().astype(int)
+    return torch.tensor(self.pt[t_]), nans
+class static_importance_sampler():
+  def __init__(self, N):
+    self.N = N
+    self.pt = np.ones(N, dtype=np.float) / N
+    self.update_pt()
+
+  def add(self, tee, ell):
+    pass
+
+  def update_pt(self):
+    t = np.linspace(0., 1., num=self.N)
+    p = np.exp(-2.*t)
+    self.pt = p / np.sum(p)
+
+  def sample_t(self, batch_size, device):
+    t_idx = torch.multinomial(input=torch.Tensor(self.pt), num_samples=batch_size, replacement=True).to(device)
+    t = t_idx / self.N
+    return t, t_idx  #return a sample from [0, 1), weighted by p_t, and original bucket as well
+
+  def pluck_pt(self, t):
+    nans = False #for compatibility
+    t_ = t.cpu().numpy().astype(int)
+    return torch.tensor(self.pt[t_]), nans
+
+
+
+
+
+
+
+
+
+
+
+

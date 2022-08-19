@@ -45,6 +45,10 @@ def optimization_manager(config):
                   warmup=config.optim.warmup,
                   grad_clip=config.optim.grad_clip):
     """Optimizes with warmup and gradient clipping (disabled if negative)."""
+    if os.environ.get('DISABLE_WEIGHT_UPDATE', "false") == "true":
+      print("Skipping weight update")
+      return
+      
     if warmup > 0:
       for g in optimizer.param_groups:
         g['lr'] = lr * np.minimum(step / warmup, 1.0)
@@ -52,6 +56,7 @@ def optimization_manager(config):
       #params = [p for p in params] #make a copy of the generator contents so we can use it twice
       torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=grad_clip)
     optimizer.step()
+
     lipschitz = False
     if lipschitz:
       with torch.no_grad():
@@ -205,24 +210,24 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
       return torch.zeros(1)
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
 
-    
     t, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
-    print(T_idx)
     t = t * (sde.T - eps) + eps
 
+    print("Timesteps in this batch: ", T_idx)
 
-    #t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
     z = torch.randn_like(batch)
     
     with torch.no_grad():
       mean, std = sde.marginal_prob(batch, t)
       perturbed_data = mean + std[:, None, None, None] * z
+    
     perturbed_data = perturbed_data.detach()
-
     xs = perturbed_data
     xs.requires_grad_(True)
 
     score = score_fn(xs, t)
+
+
 
     nbatch, nchannels, width, height = xs.shape
 
@@ -241,34 +246,34 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 
     loss = loss1 + loss2
 
-    #c = 1e4
-    #loss = loss.clamp(-c, c)
+    c = 1e6
+    loss = loss.clamp(-c, c)
     #loss = loss * torch.exp(-2.5*(1-t))
     #loss = loss.clamp(-2000, 2000)
+
     sde.importance_sampler.add(tee=T_idx, ell=loss)
-    normalization, nans = sde.importance_sampler.pluck_pt(T_idx)
-    
+    normalization, mask = sde.importance_sampler.get_normalization(T_idx)
     loss = loss / normalization.to(batch.device)
-    
+
+    #nans = False 
     #write loss vs. t to disk:
-    if not(nans) and not(os.path.exists("loss_vs_t_dump/disable")):
-      data = np.stack((t.cpu(), loss.cpu().detach()), axis=1)
-      np.save(f"loss_vs_t_dump/{uuid.uuid4()}_data", data)
-      np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
+    #os.makedirs("t_sample_dump", exist_ok=True)
+    #if not(os.path.exists("loss_vs_t_dump/disable")):
+      #data = np.stack((t.cpu(), loss.cpu().detach()), axis=1)
+      #np.save(f"loss_vs_t_dump/{uuid.uuid4()}_data", data)
+    #np.save(f"t_sample_dump/{uuid.uuid4()}_t", T_idx.cpu().numpy())
+    np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
 
-
-    #lambda_t = 1.0 / (torch.norm(loss2, dim=-1) + torch.norm(loss1, dim=-1))
-    #lambda_t = 1.0 / t #(torch.norm(loss2, dim=-1) + torch.norm(loss1, dim=-1))
-    #loss = loss * lambda_t
-    if nans:
-      return loss.mean()*0.0
+    if mask == 0.0:
+      os.environ['DISABLE_WEIGHT_UPDATE'] = "true"
     else:
-      return loss.mean()
+      os.environ['DISABLE_WEIGHT_UPDATE'] = "false"
+
+
+    return loss.mean() * mask  #mask will be zero until the history buffer is full
 
   return loss_fn
 
-#Select the loss function we want to override with here:
-get_sde_loss_fn = get_sliced_score_matching_loss_fn
 
 
 def get_smld_loss_fn(vesde, train, reduce_mean=False):
@@ -293,6 +298,11 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
     return loss
 
   return loss_fn
+
+
+#Select the loss function we want to override with here:
+get_sde_loss_fn = get_sliced_score_matching_loss_fn
+#get_sde_loss_fn = get_sde_loss_fn_original
 
 
 def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
