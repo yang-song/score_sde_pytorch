@@ -56,7 +56,7 @@ class importance_sampler():
       t_idx = torch.multinomial(input=torch.Tensor(self.pt), num_samples=batch_size, replacement=True).to(device)
 
     slice = len(t_idx) // 2
-    t_idx[0:slice] = torch.randint(0,self.N, slice)
+    t_idx[0:slice] = torch.Tensor(np.random.randint(0,self.N, slice))
 
     t = t_idx / self.N
     return t, t_idx  #return a sample from [0, 1), weighted by p_t, and original bucket as well
