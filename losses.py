@@ -116,7 +116,6 @@ def get_sde_loss_fn_original(sde, train, reduce_mean=True, continuous=True, like
 
 def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihood_weighting=True, eps=1e-5):
   """
-  This one only produces blobs (i.e. it doesn't work). Included here for completeness
 
 
   Create a loss function for training with arbirary SDEs.
@@ -163,7 +162,7 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
     nbatch, nchannels, width, height = xs.shape
     xs.requires_grad_(True)
 
-    sigma=float(os.environ.get('LOSS_SIGMA'))
+    sigma=0.4
     xs_corrupt = xs + torch.randn_like(xs)*sigma
 
     score_corrupt = score_fn(xs_corrupt, t)
@@ -301,9 +300,9 @@ def get_smld_loss_fn(vesde, train, reduce_mean=False):
 
 
 #Select the loss function we want to override with here:
-get_sde_loss_fn = get_sliced_score_matching_loss_fn
+#get_sde_loss_fn = get_sliced_score_matching_loss_fn
 #get_sde_loss_fn = get_sde_loss_fn_original
-
+get_sde_loss_fn = get_dsm_sde_loss_fn
 
 def get_ddpm_loss_fn(vpsde, train, reduce_mean=True):
   """Legacy code to reproduce previous results on DDPM. Not recommended for new work."""
