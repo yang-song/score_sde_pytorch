@@ -162,7 +162,7 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
     nbatch, nchannels, width, height = xs.shape
     xs.requires_grad_(True)
 
-    sigma=0.4
+    sigma=torch.std(xs) #0.4
     xs_corrupt = xs + torch.randn_like(xs)*sigma
 
     score_corrupt = score_fn(xs_corrupt, t)
