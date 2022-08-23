@@ -150,7 +150,9 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
       return torch.zeros(1)
 
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
-    t = torch.rand(batch.shape[0], device=batch.device) * (sde.T - eps) + eps
+    t_frac = torch.rand(batch.shape[0], device=batch.device)
+    t = t_frac * (sde.T - eps) + eps
+
     z = torch.randn_like(batch)
     
     with torch.no_grad():
@@ -162,7 +164,7 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
     nbatch, nchannels, width, height = xs.shape
     xs.requires_grad_(True)
 
-    sigma=torch.std(xs) #0.4
+    sigma=torch.tanh(-3.0*t_frac)+1
     xs_corrupt = xs + torch.randn_like(xs)*sigma
 
     score_corrupt = score_fn(xs_corrupt, t)
