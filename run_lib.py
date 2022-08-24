@@ -77,6 +77,11 @@ def train(config, workdir):
       contains checkpoint training will be resumed from the latest checkpoint.
   """
 
+  # save the config
+  config_path = os.path.join(workdir, "config.yml")
+  with open(config_path, 'w') as f:
+    f.write(config.to_yaml())
+
   # Create directories for experimental logs
   sample_dir = os.path.join(workdir, "samples")
   os.makedirs(sample_dir, exist_ok=True)
