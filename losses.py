@@ -150,7 +150,13 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
       return torch.zeros(1)
 
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
-    t_frac = torch.rand(batch.shape[0], device=batch.device)
+    #t_frac = torch.rand(batch.shape[0], device=batch.device)
+
+    t_frac, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
+
+    print("Timesteps in this batch: ", T_idx)
+
+
     t = t_frac * (sde.T - eps) + eps
 
     z = torch.randn_like(batch)
@@ -176,7 +182,31 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
     loss = torch.norm(score_corrupt - grad, dim=-1)**2
     loss = loss.mean() / 2.
     
-    return loss
+    sde.importance_sampler.add(tee=T_idx, ell=loss)
+    normalization, mask = sde.importance_sampler.get_normalization(T_idx)
+    loss = loss / normalization.to(batch.device)
+
+    #nans = False 
+    #write loss vs. t to disk:
+    #os.makedirs("t_sample_dump", exist_ok=True)
+    #if not(os.path.exists("loss_vs_t_dump/disable")):
+      #data = np.stack((t.cpu(), loss.cpu().detach()), axis=1)
+      #np.save(f"loss_vs_t_dump/{uuid.uuid4()}_data", data)
+    #np.save(f"t_sample_dump/{uuid.uuid4()}_t", T_idx.cpu().numpy())
+    np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
+
+    if mask == 0.0:
+      os.environ['DISABLE_WEIGHT_UPDATE'] = "true"
+    else:
+      os.environ['DISABLE_WEIGHT_UPDATE'] = "false"
+
+
+    return loss.mean() * mask  #mask will be zero until the history buffer is full
+
+
+
+
+
 
   return loss_fn
 
