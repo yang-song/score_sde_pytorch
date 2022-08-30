@@ -114,23 +114,31 @@ def generate_predictions(sampling_fn, score_model, config, cond_batch, target_tr
     samples_ds = samples_ds.rename({"target_pr": "pred_pr"})
     return samples_ds
 
-def load_config(config_name, sde):
-    config_path = os.path.join(os.path.dirname(__file__), "configs", re.sub(r'sde$', '', sde.value.lower()), f"{config_name}.py")
+def load_config(config_path):
+    # config_path = os.path.join(os.path.dirname(__file__), "configs", re.sub(r'sde$', '', sde.value.lower()), f"{config_name}.py")
 
-    spec = importlib.util.spec_from_file_location("config", config_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module.get_config()
+    # spec = importlib.util.spec_from_file_location("config", config_path)
+    # module = importlib.util.module_from_spec(spec)
+    # spec.loader.exec_module(module)
+    # return module.get_config()
+    import yaml
+    from ml_collections import config_dict
+
+    with open(config_path) as f:
+        config = config_dict.ConfigDict(yaml.unsafe_load(f))
+
+    return config
 
 @app.command()
 @slack_sender(webhook_url=os.getenv("KK_SLACK_WH_URL"), channel="general")
 def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "val", sde: SDEOption = SDEOption.subVPSDE, config_name: str = "xarray_cncsnpp_continuous", checkpoint_id: int = typer.Option(...), image_size: int = None, batch_size: int = None, num_samples: int = 3, map_features: int = None):
-    config = load_config(config_name, sde)
-    config.data.dataset_name = dataset
-    if map_features is not None:
-        config.model.map_features = map_features
-    if image_size is not None:
-        config.data.image_size = image_size
+    config_path = os.path.join(workdir, "config.yml")
+    config = load_config(config_path)
+    # config.data.dataset_name = dataset
+    # if map_features is not None:
+    #     config.model.map_features = map_features
+    # if image_size is not None:
+    #     config.data.image_size = image_size
     if batch_size is not None:
         config.eval.batch_size = batch_size
 
