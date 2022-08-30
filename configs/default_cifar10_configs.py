@@ -40,11 +40,12 @@ def get_default_configs():
   # data
   config.data = data = ml_collections.ConfigDict()
   data.dataset = 'CIFAR10'
+  data.dataset = 'MNIST'
   data.image_size = 32
   data.random_flip = True
   data.centered = False
   data.uniform_dequantization = False
-  data.num_channels = 3
+  data.num_channels = 1 #3
 
   # model
   config.model = model = ml_collections.ConfigDict()
@@ -60,7 +61,7 @@ def get_default_configs():
   config.optim = optim = ml_collections.ConfigDict()
   optim.weight_decay = 0
   optim.optimizer = 'Adam'
-  optim.lr = 2e-5 #was 2e-4
+  optim.lr = 2e-6
   optim.beta1 = 0.9
   optim.eps = 1e-8
   optim.warmup = 5000
