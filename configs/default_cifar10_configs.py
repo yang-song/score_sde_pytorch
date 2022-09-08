@@ -28,12 +28,13 @@ def get_default_configs():
 
   # evaluation
   config.eval = evaluate = ml_collections.ConfigDict()
-  evaluate.begin_ckpt = 9
-  evaluate.end_ckpt = 26
-  evaluate.batch_size = 1024
-  evaluate.enable_sampling = False
-  evaluate.num_samples = 50000
-  evaluate.enable_loss = True
+  evaluate.begin_ckpt = 108
+  evaluate.end_ckpt = 109
+  evaluate.batch_size = 32
+  evaluate.enable_sampling = True
+  evaluate.num_samples = 32
+  evaluate.enable_loss = False
+  evaluate.enable_fid = False
   evaluate.enable_bpd = False
   evaluate.bpd_dataset = 'test'
 
@@ -41,8 +42,8 @@ def get_default_configs():
   config.data = data = ml_collections.ConfigDict()
   data.dataset = 'CIFAR10'
   data.dataset = 'MNIST'
-  data.image_size = 32
-  data.random_flip = True
+  data.image_size = 8
+  data.random_flip = False  #was True, should not use with MNIST
   data.centered = False
   data.uniform_dequantization = False
   data.num_channels = 1 #3
@@ -61,11 +62,11 @@ def get_default_configs():
   config.optim = optim = ml_collections.ConfigDict()
   optim.weight_decay = 0
   optim.optimizer = 'Adam'
-  optim.lr = 2e-6
+  optim.lr = 2e-4
   optim.beta1 = 0.9
   optim.eps = 1e-8
-  optim.warmup = 5000
-  optim.grad_clip = 0.1
+  optim.warmup = 25000
+  optim.grad_clip = 1.0
 
   config.seed = 42
   config.device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')

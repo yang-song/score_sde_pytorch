@@ -27,4 +27,8 @@ def save_checkpoint(ckpt_dir, state):
     'step': state['step']
   }
   print("Checkpoint saving disabled in utils.py")
-  #torch.save(saved_state, ckpt_dir)
+  if os.path.exists("./save_checkpoint_override"):
+    print("...but override file found so saving anyway")
+    torch.save(saved_state, ckpt_dir)
+  else:
+    print("Create a file called './save_checkpoint_override' to force-save a checkpoint")
