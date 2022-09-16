@@ -202,8 +202,99 @@ class SDE(abc.ABC):
 
     return RSDE()
 
-
 class VPSDE(SDE):
+  def __init__(self, beta_min=0.1, beta_max=20, N=1000):
+    """Construct a Variance Preserving SDE.
+
+    Args:
+      beta_min: value of beta(0)
+      beta_max: value of beta(1)
+      N: number of discretization steps
+    """
+    super().__init__(N)
+    self.beta_0 = beta_min
+    self.beta_1 = beta_max
+    self.N = N
+    self.discrete_betas = torch.linspace(beta_min / N, beta_max / N, N)
+    self.alphas = 1. - self.discrete_betas
+    self.alphas_cumprod = torch.cumprod(self.alphas, dim=0)
+    self.sqrt_alphas_cumprod = torch.sqrt(self.alphas_cumprod)
+    self.sqrt_1m_alphas_cumprod = torch.sqrt(1. - self.alphas_cumprod)
+    self.dt = torch.tensor(self.T / self.N)
+    #self.betas = torch.linspace(beta_min, beta_max, N)
+
+
+  @property
+  def T(self):
+    return 1
+
+  def numerical_sample(self, x0s, ts):
+    """
+    Params: 
+      x0s : a batch of images of shape [batch, width, height, channels]
+      ts : a batch of times, each interpreted as being between 0 and sde.T
+    
+    Numerically evolves the SDE according to the VP-SDE equation, returning
+    the "perturbed", or forward-noised samples.   
+
+    The VP-SDE is given by Eq. (32) in https://arxiv.org/pdf/2011.13456.pdf
+
+
+    Assumes the following are set as class attributes:
+      self.beta_0
+      self.beta_1
+      self.dt 
+    
+    """
+    #we only need to evolve the batch to the greatest value of t in the batch
+    maxt = (ts.max().item())  
+    t = 0
+    xs = torch.clone(x0s).to(x0s.device)
+    while t < maxt:
+      dw = torch.randn_like(x0s) * torch.sqrt(self.dt) 
+      beta_t = (self.beta_0 + t*(self.beta_1 - self.beta_0))
+      dx = -0.5*beta_t*xs*self.dt + np.sqrt(beta_t)*dw
+      #I mask the update so that any batch members that have reached their respective
+      #time are not updated further (since dx * False = 0)
+      xs = xs + dx*(t<=ts)[:, None, None, None]
+      t += self.dt.item()
+    
+    return xs
+
+
+  def sde(self, x, t):
+    beta_t = self.beta_0 + t * (self.beta_1 - self.beta_0)
+    drift = -0.5 * beta_t[:, None, None, None] * x
+    diffusion = torch.sqrt(beta_t)
+    return drift, diffusion
+
+  def marginal_prob(self, x, t):
+    log_mean_coeff = -0.25 * t ** 2 * (self.beta_1 - self.beta_0) - 0.5 * t * self.beta_0
+    mean = torch.exp(log_mean_coeff[:, None, None, None]) * x
+    std = torch.sqrt(1. - torch.exp(2. * log_mean_coeff))
+    return mean, std
+
+  def prior_sampling(self, shape):
+    return torch.randn(*shape)
+
+  def prior_logp(self, z):
+    shape = z.shape
+    N = np.prod(shape[1:])
+    logps = -N / 2. * np.log(2 * np.pi) - torch.sum(z ** 2, dim=(1, 2, 3)) / 2.
+    return logps
+
+  def discretize(self, x, t):
+    """DDPM discretization."""
+    timestep = (t * (self.N - 1) / self.T).long()
+    beta = self.discrete_betas.to(x.device)[timestep]
+    alpha = self.alphas.to(x.device)[timestep]
+    sqrt_beta = torch.sqrt(beta)
+    f = torch.sqrt(alpha)[:, None, None, None] * x - x
+    G = sqrt_beta
+    return f, G
+
+
+class VPSDE_original(SDE):
   def __init__(self, beta_min=0.1, beta_max=20, N=1000):
     """Construct a Variance Preserving SDE.
 

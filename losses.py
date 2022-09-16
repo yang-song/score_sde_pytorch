@@ -24,6 +24,7 @@ from sde_lib import VESDE, VPSDE, importance_sampler
 from tqdm import tqdm
 import os
 import uuid
+
 #import wandb
 
 def get_optimizer(config, params):
@@ -241,18 +242,29 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
 
     t, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
-    t = t * (sde.T - eps) + eps
 
     print("Timesteps in this batch: ", T_idx)
 
-    z = torch.randn_like(batch)
-    
-    with torch.no_grad():
-      mean, std = sde.marginal_prob(batch, t)
-      perturbed_data = mean + std[:, None, None, None] * z
 
-      
+
+    #T_idx = torch.linspace(0,999,batch.shape[0], dtype=int).to(batch.device)
+    #t = T_idx / sde.N
+
     
+    t = t * (sde.T - eps) + eps
+    with torch.no_grad():
+      perturbed_data = sde.numerical_sample(x0s=batch, ts=t)
+      mean, std = sde.marginal_prob(batch, t)
+      z = torch.randn_like(batch)
+      perturbed_data_analytic = mean + std[:, None, None, None] * z
+
+    np.save("x_numeric", perturbed_data.cpu())
+    np.save("x_analytic", perturbed_data_analytic.cpu())
+    np.save("x_ts", T_idx.cpu().numpy())
+
+
+
+
     perturbed_data = perturbed_data.detach()
     xs = perturbed_data
     xs.requires_grad_(True)
@@ -281,7 +293,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     #loss = loss * torch.exp(-2.5*(1-t))
     #loss = loss.clamp(-2000, 2000)
 
-    importance_sampling = False
+    importance_sampling = True
     if importance_sampling:
       sde.importance_sampler.add(tee=T_idx, ell=loss)
       normalization, mask = sde.importance_sampler.get_normalization(T_idx)
