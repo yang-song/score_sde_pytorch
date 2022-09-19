@@ -253,7 +253,8 @@ class VPSDE(SDE):
     while t < maxt:
       dw = torch.randn_like(x0s) * torch.sqrt(self.dt) 
       beta_t = (self.beta_0 + t*(self.beta_1 - self.beta_0))
-      dx = -0.5*beta_t*xs*self.dt + np.sqrt(beta_t)*dw
+      drift, diffusion = self.sde(xs, ts)
+      dx = drift*self.dt + diffusion*dw
       #I mask the update so that any batch members that have reached their respective
       #time are not updated further (since dx * False = 0)
       xs = xs + dx*(t<=ts)[:, None, None, None]
