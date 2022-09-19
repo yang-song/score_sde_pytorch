@@ -202,7 +202,7 @@ class SDE(abc.ABC):
 
     return RSDE()
 
-class VPSDE(SDE):
+class VPSDE_working_sampling(SDE):
   def __init__(self, beta_min=0.1, beta_max=20, N=1000):
     """Construct a Variance Preserving SDE.
 
