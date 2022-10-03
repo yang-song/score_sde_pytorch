@@ -108,8 +108,13 @@ def train(config, workdir):
   state = restore_checkpoint(checkpoint_meta_dir, state, config.device)
   initial_step = int(state['step'])
 
+  # Create transform saving directory
+  transform_dir = os.path.join(workdir, "transforms")
+  os.makedirs(transform_dir, exist_ok=True)
+
   # Build data iterators
   train_ds, eval_ds, _ = datasets.get_dataset(config,
+                                              transform_dir,
                                               uniform_dequantization=config.data.uniform_dequantization)
   train_iter = iter(train_ds)  # pytype: disable=wrong-arg-types
   eval_iter = iter(eval_ds)  # pytype: disable=wrong-arg-types

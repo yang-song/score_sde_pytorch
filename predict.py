@@ -149,12 +149,14 @@ def main(workdir: Path, dataset: str = typer.Option(...), dataset_split: str = "
 
     score_model, sampling_fn = load_model(config, sde, ckpt_filename)
 
+    transform_dir = os.path.join(workdir, "transforms")
+
     # Data
-    _, eval_dl, _ = datasets.get_dataset(config, evaluation=True, split=dataset_split)
+    _, eval_dl, _ = datasets.get_dataset(config, transform_dir, evaluation=True, split=dataset_split)
 
     xr_data_eval  = eval_dl.dataset.ds
 
-    _, target_transform, _ = datasets.get_transform(config)
+    _, target_transform, _ = datasets.get_transform(config, transform_dir, evaluation=True)
 
     for sample_id in range(num_samples):
         typer.echo(f"Sample run {sample_id}...")
