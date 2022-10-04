@@ -47,6 +47,10 @@ from sde_lib import VESDE, VPSDE, subVPSDE
 #                       AnnealedLangevinDynamics)
 import datasets
 
+import logging
+logger = logging.getLogger()
+logger.setLevel('INFO')
+
 app = typer.Typer()
 
 class SDEOption(str, Enum):
