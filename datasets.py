@@ -126,7 +126,7 @@ def get_dataset(config, transform_dir, uniform_dequantization=False, evaluation=
 
     train_data_loader = DataLoader(train_dataset, batch_size=batch_size)
     eval_data_loader = DataLoader(eval_dataset, batch_size=batch_size)
-    print(train_data_loader.dataset.ds["target_pr"].values[0,0,0])
+
     return train_data_loader, eval_data_loader, None
 
   else:
