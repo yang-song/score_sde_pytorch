@@ -400,14 +400,14 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
     """
     with torch.no_grad():
       # Initial sample
-      # set batch size based on the conditioning input (since batches may vary in size)
-      shape[0] = cond.shape[0]
-      x = sde.prior_sampling(shape).to(device)
+      # set batch size of output based on the conditioning input (since batches may vary in size)
+      output_shape = (cond.shape[0], *shape[1:])
+      x = sde.prior_sampling(output_shape).to(device)
       timesteps = torch.linspace(sde.T, eps, sde.N, device=device)
 
       for i in range(sde.N):
         t = timesteps[i]
-        vec_t = torch.ones(shape[0], device=t.device) * t
+        vec_t = torch.ones(output_shape[0], device=t.device) * t
         x, x_mean = corrector_update_fn(x, cond, vec_t, model=model)
         x, x_mean = predictor_update_fn(x, cond, vec_t, model=model)
 
