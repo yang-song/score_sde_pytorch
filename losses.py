@@ -247,13 +247,18 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 
 
 
-    #T_idx = torch.linspace(0,999,batch.shape[0], dtype=int).to(batch.device)
-    #t = T_idx / sde.N
+    if False: #override T with linearly space time...no good for training but useful for debugging sampling
+      T_idx = torch.linspace(0,999,batch.shape[0], dtype=int).to(batch.device)
+      t = T_idx / sde.N
 
     
     t = t * (sde.T - eps) + eps
+
+    mu_sigma = torch.stack((batch, torch.zeros_like(batch)), dim=4)
+    print(mu_sigma.shape)
+
     with torch.no_grad():
-      perturbed_data = sde.numerical_sample(x0s=batch, ts=t)
+      perturbed_data = sde.numerical_sample(x0s=mu_sigma, ts=t)
       #mean, std = sde.marginal_prob(batch, t)
       #z = torch.randn_like(batch)
       #perturbed_data_analytic = mean + std[:, None, None, None] * z
@@ -268,6 +273,10 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     perturbed_data = perturbed_data.detach()
     xs = perturbed_data
     xs.requires_grad_(True)
+
+    #FOR CIM SDE, xs is [...,(mu,sigma)], so we only want the first slice of the last dim
+    #xs_img = xs[..., 0]
+    #`print("xs:", xs.shape, "xs_img:", xs_img.shape)
 
     score = score_fn(xs, t)
 

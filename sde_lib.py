@@ -252,7 +252,6 @@ class VPSDE_working_sampling(SDE):
     xs = torch.clone(x0s).to(x0s.device)
     while t < maxt:
       dw = torch.randn_like(x0s) * torch.sqrt(self.dt) 
-      beta_t = (self.beta_0 + t*(self.beta_1 - self.beta_0))
       drift, diffusion = self.sde(xs, ts)
       dx = drift*self.dt + diffusion*dw
       #I mask the update so that any batch members that have reached their respective
@@ -293,6 +292,104 @@ class VPSDE_working_sampling(SDE):
     f = torch.sqrt(alpha)[:, None, None, None] * x - x
     G = sqrt_beta
     return f, G
+
+
+class VPSDE(VPSDE_working_sampling):
+  """
+  First attempt at CIM SDE
+   - for CIM SDE, x = [mu, sigma]
+  """
+  def __init__(self, beta_min=0.1, beta_max=20, N=1000):
+    """Construct a Variance Preserving SDE.
+
+    Args:
+      beta_min: value of beta(0)
+      beta_max: value of beta(1)
+      N: number of discretization steps
+    """
+    super().__init__(N)
+    self.N = N
+    self.dt = torch.tensor(self.T / self.N)
+    self.j = 0.5
+    self._lambda = 0.1
+
+
+  def sde(self, x, t):
+    #x is a stack of mu/sigma
+    drift = torch.zeros_like(x)
+    diffusion = torch.zeros_like(x)
+    j = self.j
+    mu = x[:,:,:,:,0]
+    Wt = torch.randn_like(mu)
+    # dW/dt = W*sqrt(dt) / dt = W/sqrt(dt)
+    mu_tilde = mu + np.sqrt(1.0/(4*j)) * Wt / torch.sqrt(self.dt)
+    sigma = x[:,:,:,:,1]
+
+    sum_mu = torch.mean(mu_tilde, dim=(1,2,3), keepdim=True)
+
+    drift_mu = -(1+j) * mu + (1+j)*mu_tilde + self._lambda*sum_mu
+    drift_sigma = -2*(1+j) * sigma - 2*j*(sigma - 0.5)**2 + 1 + j
+
+    diffusion_mu = np.sqrt(j) * (sigma - 0.5)
+    diffusion_sigma = torch.zeros_like(sigma)
+
+    drift[:,:,:,:,0] = drift_mu
+    drift[:,:,:,:,1] = drift_sigma
+
+    diffusion[:,:,:,:,0] = diffusion_mu
+    diffusion[:,:,:,:,1] = diffusion_sigma #zeros...don't actually need this line
+
+    return drift, diffusion
+
+  def numerical_sample(self, x0s, ts):
+    """
+    Params: 
+      x0s : a batch of images of shape [batch, width, height, channels]
+      ts : a batch of times, each interpreted as being between 0 and sde.T
+    
+    Numerically evolves the SDE according to the VP-SDE equation, returning
+    the "perturbed", or forward-noised samples.   
+
+    The VP-SDE is given by Eq. (32) in https://arxiv.org/pdf/2011.13456.pdf
+
+
+    Assumes the following are set as class attributes:
+      self.beta_0
+      self.beta_1
+      self.dt 
+    
+    """
+    #we only need to evolve the batch to the greatest value of t in the batch
+    last_dim = len(x0s.shape)
+   # print("x0s", x0s.shape)
+    mu_sigma = x0s #stacked in loss function## torch.stack((x0s, torch.zeros_like(x0s)), dim=last_dim)
+    #print("mu_sigma", mu_sigma.shape)
+    maxt = (ts.max().item())  
+    t = 0
+    xs = torch.clone(mu_sigma).to(x0s.device)
+
+    while t < maxt:
+#      print("xs_in", xs.shape)
+      dw = torch.randn_like(xs) * torch.sqrt(self.dt) 
+      drift, diffusion = self.sde(xs, ts)
+#      print("drift", drift.shape)
+#      print("diffusion", diffusion.shape)
+      dx = drift*self.dt + diffusion*dw
+      #I mask the update so that any batch members that have reached their respective
+      #time are not updated further (since dx * False = 0)
+
+#      print("dx", dx.shape)
+      bcast_mask = (t<=ts)[:, None, None, None, None]
+#      print("mask", bcast_mask.shape)
+
+      xs = xs + dx*bcast_mask
+#      print("xs_out", xs.shape)
+      #error()
+
+      t += self.dt.item()
+
+    return xs[:,:,:,:,0] #return only mu
+
 
 
 class VPSDE_original(SDE):

@@ -149,14 +149,17 @@ def get_score_fn(sde, model, train=False, continuous=False):
         # continuously-trained models.
         labels = t * 999
         score = model_fn(x, labels)
-        std = sde.marginal_prob(torch.zeros_like(x), t)[1]
+        #std = sde.marginal_prob(torch.zeros_like(x), t)[1]
+        std = torch.std(x)
       else:
         # For VP-trained models, t=0 corresponds to the lowest noise level
         labels = t * (sde.N - 1)
         score = model_fn(x, labels)
-        std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
+        #std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
+        std = torch.std(x)
 
-      score = -score / std[:, None, None, None]
+      #score = -score / std[:, None, None, None]
+      score = -score / std
       return score
 
   elif isinstance(sde, sde_lib.VESDE):
