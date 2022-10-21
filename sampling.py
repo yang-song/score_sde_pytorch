@@ -22,6 +22,9 @@ import torch
 import numpy as np
 import abc
 
+import h5py 
+import os
+
 from models.utils import from_flattened_numpy, to_flattened_numpy, get_score_fn
 from scipy import integrate
 import sde_lib
@@ -389,7 +392,7 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
                                           snr=snr,
                                           n_steps=n_steps)
 
-  def pc_sampler(model):
+  def pc_sampler(model, chkpt=0):
     """ The PC sampler funciton.
 
     Args:
@@ -401,12 +404,23 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
       # Initial sample
       x = sde.prior_sampling(shape).to(device)
       timesteps = torch.linspace(sde.T, eps, sde.N, device=device)
+      
+
+      all_xs = []
 
       for i in tqdm(range(sde.N)):
         t = timesteps[i]
         vec_t = torch.ones(shape[0], device=t.device) * t
         x, x_mean = corrector_update_fn(x, vec_t, model=model)
         x, x_mean = predictor_update_fn(x, vec_t, model=model)
+        all_xs.append(x.cpu().numpy()[np.newaxis])
+
+      if os.environ.get('DEBUG') == "1":
+          print("Saving backward trajectory as...")
+          with h5py.File("debug_data.h5", 'a') as F:
+            print(f'backward/trajectory_chkpt_{chkpt}/xs')
+            print(len(all_xs))
+            F.create_dataset(f'backward/trajectory_chkpt_{chkpt}/xs', data=np.concatenate(all_xs))
 
       return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)
 

@@ -169,7 +169,7 @@ def train(config, workdir):
       if config.training.snapshot_sampling:
         ema.store(score_model.parameters())
         ema.copy_to(score_model.parameters())
-        sample, n = sampling_fn(score_model)
+        sample, n = sampling_fn(score_model, chkpt=step)
         ema.restore(score_model.parameters())
         this_sample_dir = os.path.join(sample_dir, "iter_{}".format(step))
         tf.io.gfile.makedirs(this_sample_dir)

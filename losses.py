@@ -241,21 +241,28 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
       return torch.zeros(1)
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
 
-    t, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
+#    T_sampling = "linear"
+    T_sampling = "importance"
+#    T_sampling = "terminal"
 
-    print("Timesteps in this batch: ", T_idx)
-
-
-
-    if False: #override T with linearly space time...no good for training but useful for debugging sampling
+    if T_sampling == "linear": #override T with linearly space time...no good for training but useful for debugging sampling
       T_idx = torch.linspace(0,999,batch.shape[0], dtype=int).to(batch.device)
       t = T_idx / sde.N
+    elif T_sampling == "importance":
+      t, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
+    elif T_sampling == "terminal":
+      T_idx = 999 * torch.ones(batch.shape[0], dtype=int).to(batch.device)
+      t = T_idx / sde.N
+    else:
+      raise NotImplementedError
 
+
+
+    print("Timesteps in this batch: ", T_idx)
     
     t = t * (sde.T - eps) + eps
 
     mu_sigma = torch.stack((batch, torch.zeros_like(batch)), dim=4)
-    print(mu_sigma.shape)
 
     with torch.no_grad():
       perturbed_data = sde.numerical_sample(x0s=mu_sigma, ts=t)
@@ -266,8 +273,6 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     np.save("x_numeric", perturbed_data.cpu())
     #np.save("x_analytic", perturbed_data_analytic.cpu())
     np.save("x_ts", T_idx.cpu().numpy())
-
-
 
 
     perturbed_data = perturbed_data.detach()

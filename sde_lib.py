@@ -1,6 +1,7 @@
 """Abstract SDE classes, Reverse SDE, and VE/VP SDEs."""
+import os
 import abc
-from re import I
+from re import I, T
 import torch
 import numpy as np
 import logging
@@ -309,9 +310,13 @@ class VPSDE(VPSDE_working_sampling):
     """
     super().__init__(N)
     self.N = N
-    self.dt = torch.tensor(self.T / self.N)
-    self.j = 0.5
-    self._lambda = 0.1
+    self.dt = torch.tensor(self.T / self.N) 
+    self.j = 5. 
+    self._lambda = self.j #Farhad said lambda~j should be good
+    self._last_dw = None
+    self._prior_params = dict()
+
+    self.debug_sampling_counter = 0
 
 
   def sde(self, x, t):
@@ -319,29 +324,40 @@ class VPSDE(VPSDE_working_sampling):
     drift = torch.zeros_like(x)
     diffusion = torch.zeros_like(x)
     j = self.j
+    
+    # slice out mu and sigma
     mu = x[:,:,:,:,0]
-    Wt = torch.randn_like(mu)
-    # dW/dt = W*sqrt(dt) / dt = W/sqrt(dt)
-    mu_tilde = mu + np.sqrt(1.0/(4*j)) * Wt / torch.sqrt(self.dt)
     sigma = x[:,:,:,:,1]
 
-    sum_mu = torch.mean(mu_tilde, dim=(1,2,3), keepdim=True)
+    # make some noise!
+    # save it in the object because we'll need to use the
+    # same noise for numerical sampling
+    Wt = torch.randn_like(x)
+    dw = Wt * torch.sqrt(self.dt)
+    self._last_dw = dw
 
-    drift_mu = -(1+j) * mu + (1+j)*mu_tilde + self._lambda*sum_mu
-    drift_sigma = -2*(1+j) * sigma - 2*j*(sigma - 0.5)**2 + 1 + j
+    #compute mu_tilde
+    mu_tilde = mu + np.sqrt(1.0/(4*j)) * (dw[..., 0] / self.dt)
+    
+    #drift term, gradient wrt xi of Sum(xi,xj)= sum xj
+    #sum_mu = torch.mean(mu_tilde, dim=(1,2,3), keepdim=True)
+    #print("sum_mu.shape=", sum_mu.shape)
+    
+    drift[..., 0] = (-(1+j)*mu + (1+j)*mu_tilde - self._lambda*mu_tilde)
+    drift[..., 1] = -2*(1+j)*sigma - 2*j*(sigma-0.5)**2 + (1+j)
 
-    diffusion_mu = np.sqrt(j) * (sigma - 0.5)
-    diffusion_sigma = torch.zeros_like(sigma)
-
-    drift[:,:,:,:,0] = drift_mu
-    drift[:,:,:,:,1] = drift_sigma
-
-    diffusion[:,:,:,:,0] = diffusion_mu
-    diffusion[:,:,:,:,1] = diffusion_sigma #zeros...don't actually need this line
+    diffusion[..., 0] = np.sqrt(j)*(sigma - 0.5)
+    diffusion[..., 1] = torch.zeros_like(sigma)
 
     return drift, diffusion
 
-  def numerical_sample(self, x0s, ts):
+  def prior_sampling(self, shape):
+    pT = torch.zeros(shape)
+    pT[..., 0] = 0.07077503 * (torch.randn(*shape[:-1]) -0.0049188)
+    pT[..., 1] = 0.50000
+    return pT
+
+  def numerical_sample(self, x0s, ts, return_full=False):
     """
     Params: 
       x0s : a batch of images of shape [batch, width, height, channels]
@@ -359,6 +375,7 @@ class VPSDE(VPSDE_working_sampling):
       self.dt 
     
     """
+
     #we only need to evolve the batch to the greatest value of t in the batch
     last_dim = len(x0s.shape)
    # print("x0s", x0s.shape)
@@ -368,10 +385,17 @@ class VPSDE(VPSDE_working_sampling):
     t = 0
     xs = torch.clone(mu_sigma).to(x0s.device)
 
+    debug_all_xs = []
+    debug_all_ts = []
+
     while t < maxt:
 #      print("xs_in", xs.shape)
-      dw = torch.randn_like(xs) * torch.sqrt(self.dt) 
+      #torch.randn_like(xs) * torch.sqrt(self.dt)
+
       drift, diffusion = self.sde(xs, ts)
+      
+      dw = self._last_dw
+      assert dw is not None, "dw shouldn't be None. There's a problem."
 #      print("drift", drift.shape)
 #      print("diffusion", diffusion.shape)
       dx = drift*self.dt + diffusion*dw
@@ -386,9 +410,36 @@ class VPSDE(VPSDE_working_sampling):
 #      print("xs_out", xs.shape)
       #error()
 
-      t += self.dt.item()
+      debug_all_xs.append(xs.cpu().numpy()[np.newaxis])
+      debug_all_ts.append(np.array([t]))
 
-    return xs[:,:,:,:,0] #return only mu
+      t += self.dt.item()
+    
+
+    if os.environ.get('DEBUG') == "1":
+      if self.debug_sampling_counter % 100 == 0:
+        with h5py.File("debug_data.h5", 'a') as F:
+          F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/xs', data=np.concatenate(debug_all_xs))
+          F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/ts', data=np.concatenate(debug_all_ts))
+
+      try:
+        with h5py.File("debug_data.h5", 'a') as F:
+          F['forward/terminal/xTs'].resize((F['forward/terminal/xTs'].shape[0] + xs.shape[0]), axis=0)
+          F['forward/terminal/xTs'][-xs.shape[0]:] = xs.cpu().numpy()
+          F['forward/terminal/ts'].resize((F['forward/terminal/ts'].shape[0] + ts.shape[0]), axis=0)
+          F['forward/terminal/ts'][-ts.shape[0]:] = ts.cpu().numpy()
+      except KeyError:
+        with h5py.File("debug_data.h5", "a") as F:
+          F.create_dataset('forward/terminal/xTs', data=xs.cpu().numpy(), chunks=True, maxshape=(None,)*len(xs.shape))
+          F.create_dataset('forward/terminal/ts', data=ts.cpu().numpy(), chunks=True, maxshape=(None,)*len(ts.shape))
+          
+
+    self.debug_sampling_counter += 1    
+    
+    if return_full:
+      return xs
+    else:
+      return xs[:,:,:,:,0] #return only mu
 
 
 
