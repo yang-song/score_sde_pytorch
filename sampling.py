@@ -415,7 +415,8 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
         x, x_mean = predictor_update_fn(x, vec_t, model=model)
         all_xs.append(x.cpu().numpy()[np.newaxis])
 
-      if os.environ.get('DEBUG') == "1":
+
+      if "full_backward_trajectories" in os.environ.get('DEBUG'):
           print("Saving backward trajectory as...")
           with h5py.File("debug_data.h5", 'a') as F:
             print(f'backward/trajectory_chkpt_{chkpt}/xs')

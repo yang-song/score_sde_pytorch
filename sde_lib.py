@@ -23,11 +23,17 @@ class importance_sampler():
     self.t = np.linspace(0,1,num=self.N)
 
   def dump_state(self):
-    with h5py.File("importance_sampler_state.h5", 'w') as F:
-      F.create_dataset("history2", data=self.history_2)
-      F.create_dataset("pt", self.pt)
-      F.create_dataset(self.t)
-  
+    if "importance_sampler_weighting" in os.environ.get('DEBUG'):
+      ds='training/importance/pts'
+      try:
+        with h5py.File("debug_data.h5", 'a') as F:
+          F[ds].resize((F[ds].shape[0] + 1), axis=0)
+          F[ds][-1] = self.pt
+      except KeyError:
+        with h5py.File("debug_data.h5", "a") as F:
+          print(self.pt[np.newaxis, :].shape)
+          F.create_dataset(ds, data=self.pt[np.newaxis, :], chunks=True, maxshape=(None, self.N))
+
   def add(self, tee, ell):
     """
        tee ~ [batch_size]
@@ -39,7 +45,7 @@ class importance_sampler():
       t=int(t)
       self.history_2[t, :] = np.roll(self.history_2[t,:], 1)
       self.history_2[t, 0] = L**2
-    
+     
     self.update_pt()
 
   def update_pt(self):
@@ -48,6 +54,7 @@ class importance_sampler():
       self.pt = pt / np.sum(pt)
 
   def sample_t(self, batch_size, device):
+    self.dump_state() #write the state to the debug file if debugging on
     if np.isnan(self.history_2).any():
       mean = np.mean(self.history_2, axis=1)  #will be nan in columns that have Nans
       nan_idx = np.where(np.isnan(mean))[0]
@@ -311,7 +318,7 @@ class VPSDE(VPSDE_working_sampling):
     super().__init__(N)
     self.N = N
     self.dt = torch.tensor(self.T / self.N) 
-    self.j = 5. 
+    self.j = 10. 
     self._lambda = self.j #Farhad said lambda~j should be good
     self._last_dw = None
     self._prior_params = dict()
@@ -353,7 +360,7 @@ class VPSDE(VPSDE_working_sampling):
 
   def prior_sampling(self, shape):
     pT = torch.zeros(shape)
-    pT[..., 0] = 0.07077503 * (torch.randn(*shape[:-1]) -0.0049188)
+    pT[..., 0] = 0.035443030297756195 * (torch.randn(*shape[:-1]))
     pT[..., 1] = 0.50000
     return pT
 
@@ -416,12 +423,12 @@ class VPSDE(VPSDE_working_sampling):
       t += self.dt.item()
     
 
-    if os.environ.get('DEBUG') == "1":
+    if "full_forward_trajectories" in os.environ.get('DEBUG'):
       if self.debug_sampling_counter % 100 == 0:
         with h5py.File("debug_data.h5", 'a') as F:
           F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/xs', data=np.concatenate(debug_all_xs))
           F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/ts', data=np.concatenate(debug_all_ts))
-
+    if "terminal_forward_samples" in os.environ.get('DEBUG'):
       try:
         with h5py.File("debug_data.h5", 'a') as F:
           F['forward/terminal/xTs'].resize((F['forward/terminal/xTs'].shape[0] + xs.shape[0]), axis=0)

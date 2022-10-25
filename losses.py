@@ -157,7 +157,6 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
 
     print("Timesteps in this batch: ", T_idx)
 
-
     t = t_frac * (sde.T - eps) + eps
 
     z = torch.randn_like(batch)
@@ -202,11 +201,6 @@ def get_dsm_sde_loss_fn(sde, train, reduce_mean=True, continuous=True, likelihoo
 
 
     return loss.mean() * mask  #mask will be zero until the history buffer is full
-
-
-
-
-
 
   return loss_fn
 
@@ -270,9 +264,9 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
       #z = torch.randn_like(batch)
       #perturbed_data_analytic = mean + std[:, None, None, None] * z
 
-    np.save("x_numeric", perturbed_data.cpu())
+    #np.save("x_numeric", perturbed_data.cpu())
     #np.save("x_analytic", perturbed_data_analytic.cpu())
-    np.save("x_ts", T_idx.cpu().numpy())
+    #np.save("x_ts", T_idx.cpu().numpy())
 
 
     perturbed_data = perturbed_data.detach()
