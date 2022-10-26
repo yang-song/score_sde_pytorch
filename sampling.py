@@ -413,14 +413,13 @@ def get_pc_sampler(sde, shape, predictor, corrector, inverse_scaler, snr,
         vec_t = torch.ones(shape[0], device=t.device) * t
         x, x_mean = corrector_update_fn(x, vec_t, model=model)
         x, x_mean = predictor_update_fn(x, vec_t, model=model)
+        x = torch.clamp(x, -10, 10)
         all_xs.append(x.cpu().numpy()[np.newaxis])
 
 
       if "full_backward_trajectories" in os.environ.get('DEBUG'):
           print("Saving backward trajectory as...")
           with h5py.File("debug_data.h5", 'a') as F:
-            print(f'backward/trajectory_chkpt_{chkpt}/xs')
-            print(len(all_xs))
             F.create_dataset(f'backward/trajectory_chkpt_{chkpt}/xs', data=np.concatenate(all_xs))
 
       return inverse_scaler(x_mean if denoise else x), sde.N * (n_steps + 1)

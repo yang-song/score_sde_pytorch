@@ -24,6 +24,7 @@ from sde_lib import VESDE, VPSDE, importance_sampler
 from tqdm import tqdm
 import os
 import uuid
+import h5py
 
 #import wandb
 
@@ -277,7 +278,10 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     #xs_img = xs[..., 0]
     #`print("xs:", xs.shape, "xs_img:", xs_img.shape)
 
+
     score = score_fn(xs, t)
+
+
 
     nbatch, nchannels, width, height = xs.shape
 
@@ -296,10 +300,15 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 
     loss = loss1 + loss2
 
+    loss_raw = loss*1.0
+    
+    
     c = 1e5
     loss = loss.clamp(-c, c)
     #loss = loss * torch.exp(-2.5*(1-t))
     #loss = loss.clamp(-2000, 2000)
+
+    loss_clamped = loss*1.0
 
     importance_sampling = True
     if importance_sampling:
@@ -323,7 +332,34 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     else:
       os.environ['DISABLE_WEIGHT_UPDATE'] = "false"
 
+    
+    
+    if "training_loss" in os.environ.get('DEBUG'):
+      ds='training/losses/loss'
+      try:
+        with h5py.File("debug_data.h5", 'a') as F:
+          F[ds].resize((F[ds].shape[0] + 1), axis=0)
+          F[ds+"_raw"].resize((F[ds+"_raw"].shape[0] + 1), axis=0)
+          F[ds+"_clamped"].resize((F[ds+"_clamped"].shape[0] + 1), axis=0)
+          F[ds][-1] = loss.mean().item()
+          F[ds+"_raw"][-1] = loss_raw.mean().item()
+          F[ds+"_clamped"][-1] = loss_clamped.mean().item()
+      except KeyError:
+        with h5py.File("debug_data.h5", "a") as F:
+          F.create_dataset(ds,            data=np.array([loss.mean().item()]),         chunks=True, maxshape=(None,))
+          F.create_dataset(ds+"_raw",     data=np.array([loss_raw.mean().item()]),     chunks=True, maxshape=(None,))
+          F.create_dataset(ds+"_clamped", data=np.array([loss_clamped.mean().item()]), chunks=True, maxshape=(None,))
+    
+    
+    
+    
+    
     return loss.mean() * mask  #mask will be zero until the history buffer is full
+
+
+
+
+
 
   return loss_fn
 

@@ -158,6 +158,8 @@ def get_score_fn(sde, model, train=False, continuous=False):
         #std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
         std = torch.std(x, dim=(1,2,3))
 
+      std = torch.clamp(std, 1e-7, 10)
+
       score = -score / std[:, None, None, None]
       return score
 

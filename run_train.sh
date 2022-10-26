@@ -12,6 +12,8 @@ export DEBUG="$DEBUG full_backward_trajectories"
 #export DEBUG="$DEBUG full_forward_trajectories"
 #export DEBUG="$DEBUG terminal_forward_samples"
 export DEBUG="$DEBUG importance_sampler_weighting"
+export DEBUG="$DEBUG training_loss"
+export DEBUG="$DEBUG backward_score_evaluations"
                     
 
 
@@ -19,7 +21,7 @@ export DEBUG="$DEBUG importance_sampler_weighting"
 #SSM
 #rm -r ./workdir_SSM_radermacher
 #rm -r ./loss_vs_t_dump && mkdir loss_vs_t_dump
-#rm debug_data.h5 
+mv debug_data.h5 debug_data_last.h5
 if [[ "x$1" == "xhardreset" ]]; then
 	  rm -r ~/.cache/torch_extensions/
 fi

@@ -203,8 +203,33 @@ class SDE(abc.ABC):
 
       def discretize(self, x, t):
         """Create discretized iteration rules for the reverse diffusion sampler."""
+        """THIS IS THE ONE THAT IS USED"""
         f, G = discretize_fn(x, t)
-        rev_f = f - G[:, None, None, None] ** 2 * score_fn(x, t) * (0.5 if self.probability_flow else 1.)
+
+        score = score_fn(x, t)
+        print("x:", x.shape)
+        print("score:", score.shape)
+        print("t:", t.shape)
+
+        if "backward_score_evaluations" in os.environ.get('DEBUG'):
+          chkpt = os.environ.get("INTERNAL_CURRENT_CHECKPOINT")
+          ds = f'backward/score_evaluation_chkpt_{chkpt}/'
+          try:
+            with h5py.File("debug_data.h5", 'a') as F:
+              F[ds+'xs'].resize((F[ds+'xs'].shape[0] + 1), axis=0)
+              F[ds+'xs'][-1, :] = x.detach().cpu().numpy()              
+
+              F[ds+'score'].resize((F[ds+'score'].shape[0] + 1), axis=0)
+              F[ds+'score'][-1, :] = score.detach().cpu().numpy()              
+
+          except KeyError:
+            with h5py.File("debug_data.h5", "a") as F:
+              F.create_dataset(ds+'xs', data=x.cpu().numpy()[np.newaxis, :], chunks=True, maxshape=[None,]+list(x.shape))
+              F.create_dataset(ds+'score', data=score.cpu().numpy()[np.newaxis, :], chunks=True, maxshape=[None,]+list(score.shape))
+
+
+
+        rev_f = f - G[:, None, None, None] ** 2 * score * (0.5 if self.probability_flow else 1.)
         rev_G = torch.zeros_like(G) if self.probability_flow else G
         return rev_f, rev_G
 
