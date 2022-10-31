@@ -239,19 +239,21 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 #    T_sampling = "linear"
     T_sampling = "importance"
 #    T_sampling = "terminal"
+#    T_sampling = "uniform"
 
     if T_sampling == "linear": #override T with linearly space time...no good for training but useful for debugging sampling
-      T_idx = torch.linspace(0,999,batch.shape[0], dtype=int).to(batch.device)
+      T_idx = torch.linspace(0,sde.N,batch.shape[0], dtype=int).to(batch.device)
       t = T_idx / sde.N
     elif T_sampling == "importance":
       t, T_idx = sde.importance_sampler.sample_t(batch_size=batch.shape[0], device=batch.device)
     elif T_sampling == "terminal":
       T_idx = 999 * torch.ones(batch.shape[0], dtype=int).to(batch.device)
       t = T_idx / sde.N
+    elif T_sampling == "uniform":
+      T_idx = torch.randint(low=0, high=sde.N, size=(batch.shape[0],), dtype=int).to(batch.device)
+      t = T_idx / sde.N
     else:
       raise NotImplementedError
-
-
 
     print("Timesteps in this batch: ", T_idx)
     
@@ -264,11 +266,6 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
       #mean, std = sde.marginal_prob(batch, t)
       #z = torch.randn_like(batch)
       #perturbed_data_analytic = mean + std[:, None, None, None] * z
-
-    #np.save("x_numeric", perturbed_data.cpu())
-    #np.save("x_analytic", perturbed_data_analytic.cpu())
-    #np.save("x_ts", T_idx.cpu().numpy())
-
 
     perturbed_data = perturbed_data.detach()
     xs = perturbed_data
@@ -310,11 +307,11 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 
     loss_clamped = loss*1.0
 
-    importance_sampling = True
-    if importance_sampling:
-      sde.importance_sampler.add(tee=T_idx, ell=loss)
+    
+    if T_sampling == "importance":
       normalization, mask = sde.importance_sampler.get_normalization(T_idx)
-      loss = loss / normalization.to(batch.device)
+      sde.importance_sampler.add(tee=T_idx, ell=loss)
+      loss = (loss / normalization.to(batch.device))*mask
     else:
       mask=1.0
 
@@ -325,7 +322,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
       #data = np.stack((t.cpu(), loss.cpu().detach()), axis=1)
       #np.save(f"loss_vs_t_dump/{uuid.uuid4()}_data", data)
     #np.save(f"t_sample_dump/{uuid.uuid4()}_t", T_idx.cpu().numpy())
-    np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
+    #np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
 
     if mask == 0.0:
       os.environ['DISABLE_WEIGHT_UPDATE'] = "true"
@@ -354,7 +351,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     
     
     
-    return loss.mean() * mask  #mask will be zero until the history buffer is full
+    return loss.mean() 
 
 
 

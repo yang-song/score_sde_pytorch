@@ -9,7 +9,7 @@ import scipy
 import h5py
 
 class importance_sampler():
-  def __init__(self, N, h=10):
+  def __init__(self, N, h=50):
     """Construct a loss scaler for importance sampling
      
     Args:
@@ -49,9 +49,13 @@ class importance_sampler():
     self.update_pt()
 
   def update_pt(self):
-    pt = np.sqrt(np.nanmedian(self.history_2, axis=1))
-    if not np.isnan(pt).any():
-      self.pt = pt / np.sum(pt)
+    pt = np.sqrt(np.nanmean(self.history_2, axis=1))
+    
+    self.pt = pt / np.nansum(pt)
+    #print(self.pt)
+    
+    #if not np.isnan(pt).any():
+    #  self.pt = pt / np.sum(pt)
 
   def sample_t(self, batch_size, device):
     self.dump_state() #write the state to the debug file if debugging on
@@ -64,7 +68,7 @@ class importance_sampler():
       t_idx = torch.multinomial(input=torch.Tensor(self.pt), num_samples=batch_size, replacement=True).to(device)
 
     slice = len(t_idx) // 2
-    t_idx[0:slice] = torch.Tensor(np.random.randint(0,self.N, slice))
+    t_idx[0:slice] = torch.Tensor(np.random.randint(0, self.N, slice))
 
     t = t_idx / self.N
     return t, t_idx  #return a sample from [0, 1), weighted by p_t, and original bucket as well
