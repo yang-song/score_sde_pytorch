@@ -8,6 +8,7 @@ import logging
 import scipy
 import h5py
 
+
 class importance_sampler():
   def __init__(self, N, h=50):
     """Construct a loss scaler for importance sampling
@@ -21,10 +22,12 @@ class importance_sampler():
     self.history_2 = np.ones((N, h)) + np.nan
     self.pt = np.ones(N, dtype=np.float) / N
     self.t = np.linspace(0,1,num=self.N)
+    self.debug_dump_dataset = 'training/importance/pts'
+    self.debug_enabled = "importance_sampler_weighting" in os.environ.get('DEBUG')
 
   def dump_state(self):
-    if "importance_sampler_weighting" in os.environ.get('DEBUG'):
-      ds='training/importance/pts'
+    if self.debug_enabled:
+      ds=self.debug_dump_dataset
       try:
         with h5py.File("debug_data.h5", 'a') as F:
           F[ds].resize((F[ds].shape[0] + 1), axis=0)
@@ -86,11 +89,34 @@ class importance_sampler():
 
 
 
+class score_function_scaler(importance_sampler):
+  def __init__(self, N, h=50):
+    super().__init__(N, h)
+    self.debug_dump_dataset = 'training/score_scaler/scaler'
+    self.debug_enabled = "score_function_scaling" in os.environ.get('DEBUG')
+
+  def update_pt(self):
+    self.pt = np.sqrt(np.nanmean(self.history_2, axis=1))
+
+  def add(self, tee, ex):
+    """
+       tee ~ [batch_size]
+       ex  ~ [batch_size, channels, width, height]
+    """
+    tee = tee.cpu().numpy()
+    stds = torch.std(ex, dim=list(range(len(ex.shape)))[1:]).detach().cpu().numpy()
+    print("stds.shape:", stds.shape)
+    for t, std in zip(tee, stds):
+      t = int(t)
+      self.history_2[t, :] = np.roll(self.history_2[t,:], 1)
+      self.history_2[t, 0] = std**2
+    
+    self.update_pt()
 
 
-
-
-
+  def get_normalization(self, T_idx):
+    stds_squared, mask = super().get_normalization(T_idx)
+    return np.sqrt(stds_squared), mask
 
 
 
@@ -116,7 +142,8 @@ class SDE(abc.ABC):
     super().__init__()
     self.N = N
     #self.importance_sampler = fit_importance_sampler(self.N)
-    self.importance_sampler = importance_sampler(self.N, h=10)
+    self.importance_sampler = importance_sampler(self.N, h=50)
+    self.score_scaler = score_function_scaler(self.N, h=50)
 
 
   @property
@@ -354,6 +381,8 @@ class VPSDE(VPSDE_working_sampling):
 
     self.debug_sampling_counter = 0
 
+    self.batch_of_data = None
+
 
   def sde(self, x, t):
     #x is a stack of mu/sigma
@@ -388,16 +417,33 @@ class VPSDE(VPSDE_working_sampling):
     return drift, diffusion
 
   def prior_sampling(self, shape):
-    pT = torch.zeros(shape)
-    pT[..., 0] = 0.035443030297756195 * (torch.randn(*shape[:-1]))
-    pT[..., 1] = 0.50000
+  
+    prior_from_simulation = True
+    if prior_from_simulation:
+      ts = torch.ones((self.batch_of_data.shape[0]),).to(self.batch_of_data.device)
+      pT = self.numerical_sample(self.batch_of_data, ts=ts,
+                                 return_full=True, prior_sampling=True)
+      print("Prior shape:", pT.shape)
+    
+    else:
+          
+      pT = torch.zeros(shape)
+      pT[..., 0] = 0.035443030297756195 * (torch.randn(*shape[:-1]))
+      pT[..., 1] = 0.50000
+
+    if len(shape) + 1 == len(pT.shape):
+      pT = pT[..., 0]
+
+    assert pT.shape == shape, f"Undesired prior shape. Produced shape {pT.shape}, but requested {shape}."
+
     return pT
 
-  def numerical_sample(self, x0s, ts, return_full=False):
+  def numerical_sample(self, x0s, ts, return_full=False, prior_sampling=False):
     """
     Params: 
       x0s : a batch of images of shape [batch, width, height, channels]
       ts : a batch of times, each interpreted as being between 0 and sde.T
+      prior_sampling : if this is being called within the prior_sampling method
     
     Numerically evolves the SDE according to the VP-SDE equation, returning
     the "perturbed", or forward-noised samples.   
@@ -411,6 +457,9 @@ class VPSDE(VPSDE_working_sampling):
       self.dt 
     
     """
+
+    if self.batch_of_data is None:
+      self.batch_of_data = x0s
 
     #we only need to evolve the batch to the greatest value of t in the batch
     last_dim = len(x0s.shape)
@@ -451,24 +500,24 @@ class VPSDE(VPSDE_working_sampling):
 
       t += self.dt.item()
     
-
-    if "full_forward_trajectories" in os.environ.get('DEBUG'):
-      if self.debug_sampling_counter % 100 == 0:
-        with h5py.File("debug_data.h5", 'a') as F:
-          F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/xs', data=np.concatenate(debug_all_xs))
-          F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/ts', data=np.concatenate(debug_all_ts))
-    if "terminal_forward_samples" in os.environ.get('DEBUG'):
-      try:
-        with h5py.File("debug_data.h5", 'a') as F:
-          F['forward/terminal/xTs'].resize((F['forward/terminal/xTs'].shape[0] + xs.shape[0]), axis=0)
-          F['forward/terminal/xTs'][-xs.shape[0]:] = xs.cpu().numpy()
-          F['forward/terminal/ts'].resize((F['forward/terminal/ts'].shape[0] + ts.shape[0]), axis=0)
-          F['forward/terminal/ts'][-ts.shape[0]:] = ts.cpu().numpy()
-      except KeyError:
-        with h5py.File("debug_data.h5", "a") as F:
-          F.create_dataset('forward/terminal/xTs', data=xs.cpu().numpy(), chunks=True, maxshape=(None,)*len(xs.shape))
-          F.create_dataset('forward/terminal/ts', data=ts.cpu().numpy(), chunks=True, maxshape=(None,)*len(ts.shape))
-          
+    if not prior_sampling:
+      if "full_forward_trajectories" in os.environ.get('DEBUG'):
+        if self.debug_sampling_counter % 100 == 0:
+          with h5py.File("debug_data.h5", 'a') as F:
+            F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/xs', data=np.concatenate(debug_all_xs))
+            F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/ts', data=np.concatenate(debug_all_ts))
+      if "terminal_forward_samples" in os.environ.get('DEBUG'):
+        try:
+          with h5py.File("debug_data.h5", 'a') as F:
+            F['forward/terminal/xTs'].resize((F['forward/terminal/xTs'].shape[0] + xs.shape[0]), axis=0)
+            F['forward/terminal/xTs'][-xs.shape[0]:] = xs.cpu().numpy()
+            F['forward/terminal/ts'].resize((F['forward/terminal/ts'].shape[0] + ts.shape[0]), axis=0)
+            F['forward/terminal/ts'][-ts.shape[0]:] = ts.cpu().numpy()
+        except KeyError:
+          with h5py.File("debug_data.h5", "a") as F:
+            F.create_dataset('forward/terminal/xTs', data=xs.cpu().numpy(), chunks=True, maxshape=(None,)*len(xs.shape))
+            F.create_dataset('forward/terminal/ts', data=ts.cpu().numpy(), chunks=True, maxshape=(None,)*len(ts.shape))
+            
 
     self.debug_sampling_counter += 1    
     

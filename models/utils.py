@@ -150,17 +150,28 @@ def get_score_fn(sde, model, train=False, continuous=False):
         labels = t * 999
         score = model_fn(x, labels)
         #std = sde.marginal_prob(torch.zeros_like(x), t)[1]
-        std = torch.std(x, dim=(1,2,3))
+        #std = torch.std(x, dim=(1,2,3))
       else:
         # For VP-trained models, t=0 corresponds to the lowest noise level
         labels = t * (sde.N - 1)
         score = model_fn(x, labels)
+
         #std = sde.sqrt_1m_alphas_cumprod.to(labels.device)[labels.long()]
-        std = torch.std(x, dim=(1,2,3))
+        #std = torch.std(x, dim=(1,2,3))
 
-      std = torch.clamp(std, 1e-7, 10)
+      #std = torch.clamp(std, 1e-7, 10)
 
-      score = -score / std[:, None, None, None]
+      sde.score_scaler.add(tee=labels, ex=x)
+      
+
+      #score = -score / std[:, None, None, None]
+      norm, mask = sde.score_scaler.get_normalization(T_idx=labels)
+      norm = norm.type(torch.FloatTensor).to(score.device)
+      score = score.type(torch.cuda.FloatTensor)
+
+      score = -score / norm[:, None, None, None].to(score.device)
+      print("Score type:", score.type())
+      print("norm type:", norm.type())
       return score
 
   elif isinstance(sde, sde_lib.VESDE):
