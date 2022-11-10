@@ -23,6 +23,38 @@ Aside from the **NCSN++** and **DDPM++** models in our paper, this codebase also
 
 It supports training new models, evaluating the sample quality and likelihoods of existing models. We carefully designed the code to be modular and easily extensible to new SDEs, predictors, or correctors.
 
+## **Integration with 🤗 Diffusers library**
+
+Most models are now also available in 🧨 Diffusers and accesible via the [ScoreSdeVE pipeline](https://huggingface.co/docs/diffusers/api/pipelines/score_sde_ve).
+
+Diffusers allows you to test score sde based models in PyTorch in just a couple lines of code.
+
+You can install diffusers as follows:
+
+```
+pip install diffusers torch accelerate
+```
+
+And then try out the models with just a couple lines of code:
+
+```python
+from diffusers import DiffusionPipeline
+
+model_id = "google/ncsnpp-ffhq-1024"
+
+# load model and scheduler
+sde_ve = DiffusionPipeline.from_pretrained(model_id)
+
+# run pipeline in inference (sample random noise and denoise)
+image = sde_ve().images[0]
+
+
+# save image
+image[0].save("sde_ve_generated_image.png")
+```
+
+More models can be found directly [on the Hub](https://huggingface.co/models?library=diffusers&pipeline_tag=unconditional-image-generation&sort=downloads&search=ncsnpp).
+
 ## JAX version
 
 Please find a JAX implementation [here](https://github.com/yang-song/score_sde), which additionally supports class-conditional generation with a pre-trained classifier, and resuming an evalution process after pre-emption.
