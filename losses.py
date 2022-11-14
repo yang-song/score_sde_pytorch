@@ -231,7 +231,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     Returns:
       loss: A scalar that represents the average loss value across the mini-batch.
     """
-    print("Using sliced score matching loss")
+    #print("Using sliced score matching loss")
     if not train:
       return torch.zeros(1)
     score_fn = mutils.get_score_fn(sde, model, train=train, continuous=continuous)
@@ -255,7 +255,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     else:
       raise NotImplementedError
 
-    print("Timesteps in this batch: ", T_idx)
+    #print("Timesteps in this batch: ", T_idx)
     
     t = t * (sde.T - eps) + eps
 
@@ -269,6 +269,15 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
 
     perturbed_data = perturbed_data.detach()
     xs = perturbed_data
+
+
+    if torch.max(torch.abs(xs)) > 1000:
+      skip_loss_mask = 0.0
+      print("WARNING: distribution of data after forward process anomalous.  Skipping weight update for this batch for stability." )
+    else:
+      skip_loss_mask = 1.0
+
+
     xs.requires_grad_(True)
 
     #FOR CIM SDE, xs is [...,(mu,sigma)], so we only want the first slice of the last dim
@@ -311,7 +320,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     if T_sampling == "importance":
       normalization, mask = sde.importance_sampler.get_normalization(T_idx)
       sde.importance_sampler.add(tee=T_idx, ell=loss)
-      loss = (loss / normalization.to(batch.device))*mask
+      loss = (loss / normalization.to(batch.device))*mask*skip_loss_mask
     else:
       mask=1.0
 
@@ -324,7 +333,7 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     #np.save(f"t_sample_dump/{uuid.uuid4()}_t", T_idx.cpu().numpy())
     #np.save(f"importance_sampling_distribution", sde.importance_sampler.pt)
 
-    if mask == 0.0:
+    if mask == 0.0 or skip_loss_mask == 0.0:
       os.environ['DISABLE_WEIGHT_UPDATE'] = "true"
     else:
       os.environ['DISABLE_WEIGHT_UPDATE'] = "false"

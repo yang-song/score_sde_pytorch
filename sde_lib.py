@@ -52,16 +52,16 @@ class importance_sampler():
     self.update_pt()
 
   def update_pt(self):
-    pt = np.sqrt(np.nanmean(self.history_2, axis=1))
+    pt = np.sqrt(np.nanmedian(self.history_2, axis=1))
     
     self.pt = pt / np.nansum(pt)
+    self.dump_state() #write the state to the debug file if debugging on
     #print(self.pt)
     
     #if not np.isnan(pt).any():
     #  self.pt = pt / np.sum(pt)
 
   def sample_t(self, batch_size, device):
-    self.dump_state() #write the state to the debug file if debugging on
     if np.isnan(self.history_2).any():
       mean = np.mean(self.history_2, axis=1)  #will be nan in columns that have Nans
       nan_idx = np.where(np.isnan(mean))[0]
@@ -92,20 +92,29 @@ class importance_sampler():
 class score_function_scaler(importance_sampler):
   def __init__(self, N, h=50):
     super().__init__(N, h)
+    self.history_2 = np.ones((N, h-1)) + np.nan
     self.debug_dump_dataset = 'training/score_scaler/scaler'
     self.debug_enabled = "score_function_scaling" in os.environ.get('DEBUG')
+    self._freeze = False
 
   def update_pt(self):
-    self.pt = np.sqrt(np.nanmean(self.history_2, axis=1))
+    self.pt = np.sqrt(np.nanmedian(self.history_2, axis=1))
+    self.dump_state()
 
   def add(self, tee, ex):
     """
        tee ~ [batch_size]
        ex  ~ [batch_size, channels, width, height]
     """
+    if not self._freeze and not np.isnan(self.history_2).any():
+      self._freeze = True
+    
+    if self._freeze:
+      return 
+    
     tee = tee.cpu().numpy()
+    #ex = torch.clamp(ex, -1000, 1000)
     stds = torch.std(ex, dim=list(range(len(ex.shape)))[1:]).detach().cpu().numpy()
-    print("stds.shape:", stds.shape)
     for t, std in zip(tee, stds):
       t = int(t)
       self.history_2[t, :] = np.roll(self.history_2[t,:], 1)
@@ -671,19 +680,6 @@ class VESDE(SDE):
     f = torch.zeros_like(x)
     G = torch.sqrt(sigma ** 2 - adjacent_sigma ** 2)
     return f, G
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

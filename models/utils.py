@@ -170,8 +170,6 @@ def get_score_fn(sde, model, train=False, continuous=False):
       score = score.type(torch.cuda.FloatTensor)
 
       score = -score / norm[:, None, None, None].to(score.device)
-      print("Score type:", score.type())
-      print("norm type:", norm.type())
       return score
 
   elif isinstance(sde, sde_lib.VESDE):
