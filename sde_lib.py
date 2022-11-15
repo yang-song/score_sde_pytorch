@@ -85,10 +85,6 @@ class importance_sampler():
     ret_ = torch.tensor(self.pt[t_])
 
     return ret_, 1.0
-
-
-
-
 class score_function_scaler(importance_sampler):
   def __init__(self, N, h=50):
     super().__init__(N, h)
@@ -126,19 +122,6 @@ class score_function_scaler(importance_sampler):
   def get_normalization(self, T_idx):
     stds_squared, mask = super().get_normalization(T_idx)
     return np.sqrt(stds_squared), mask
-
-
-
-
-
-
-
-
-
-
-
-
-
 class SDE(abc.ABC):
   """SDE abstract class. Functions are designed for a mini-batch of inputs."""
 
@@ -274,8 +257,7 @@ class SDE(abc.ABC):
         return rev_f, rev_G
 
     return RSDE()
-
-class VPSDE_working_sampling(SDE):
+class VPSDE(SDE):
   def __init__(self, beta_min=0.1, beta_max=20, N=1000):
     """Construct a Variance Preserving SDE.
 
@@ -296,12 +278,14 @@ class VPSDE_working_sampling(SDE):
     self.dt = torch.tensor(self.T / self.N)
     #self.betas = torch.linspace(beta_min, beta_max, N)
 
+    self.debug_sampling_counter = 0
+    self.batch_of_data = None
 
   @property
   def T(self):
     return 1
 
-  def numerical_sample(self, x0s, ts):
+  def numerical_sample(self, x0s, ts, return_full=False, prior_sampling=False):
     """
     Params: 
       x0s : a batch of images of shape [batch, width, height, channels]
@@ -319,19 +303,57 @@ class VPSDE_working_sampling(SDE):
       self.dt 
     
     """
+    
+    
+    
+    if self.batch_of_data is None:
+      self.batch_of_data = x0s
+    
     #we only need to evolve the batch to the greatest value of t in the batch
     maxt = (ts.max().item())  
     t = 0
     xs = torch.clone(x0s).to(x0s.device)
+
+
+    debug_all_xs = []
+    debug_all_ts = []
+
+
     while t < maxt:
       dw = torch.randn_like(x0s) * torch.sqrt(self.dt) 
       drift, diffusion = self.sde(xs, ts)
-      dx = drift*self.dt + diffusion*dw
+
+      dx = drift*self.dt + diffusion[:, None, None, None]*dw
       #I mask the update so that any batch members that have reached their respective
       #time are not updated further (since dx * False = 0)
       xs = xs + dx*(t<=ts)[:, None, None, None]
+      
+      debug_all_xs.append(xs.cpu().numpy()[np.newaxis])
+      debug_all_ts.append(np.array([t]))
+      
       t += self.dt.item()
-    
+
+
+    if not prior_sampling:
+      if "full_forward_trajectories" in os.environ.get('DEBUG'):
+        if self.debug_sampling_counter % 100 == 0:
+          with h5py.File("debug_data.h5", 'a') as F:
+            F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/xs', data=np.concatenate(debug_all_xs))
+            F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/ts', data=np.concatenate(debug_all_ts))
+      if "terminal_forward_samples" in os.environ.get('DEBUG'):
+        try:
+          with h5py.File("debug_data.h5", 'a') as F:
+            F['forward/terminal/xTs'].resize((F['forward/terminal/xTs'].shape[0] + xs.shape[0]), axis=0)
+            F['forward/terminal/xTs'][-xs.shape[0]:] = xs.cpu().numpy()
+            F['forward/terminal/ts'].resize((F['forward/terminal/ts'].shape[0] + ts.shape[0]), axis=0)
+            F['forward/terminal/ts'][-ts.shape[0]:] = ts.cpu().numpy()
+        except KeyError:
+          with h5py.File("debug_data.h5", "a") as F:
+            F.create_dataset('forward/terminal/xTs', data=xs.cpu().numpy(), chunks=True, maxshape=(None,)*len(xs.shape))
+            F.create_dataset('forward/terminal/ts', data=ts.cpu().numpy(), chunks=True, maxshape=(None,)*len(ts.shape))
+            
+    self.debug_sampling_counter += 1
+
     return xs
 
 
@@ -367,7 +389,8 @@ class VPSDE_working_sampling(SDE):
     return f, G
 
 
-class VPSDE(VPSDE_working_sampling):
+#class VPSDE(VPSDE_working_sampling):
+class VPSDE_nonworking_(VPSDE):
   """
   First attempt at CIM SDE
    - for CIM SDE, x = [mu, sigma]

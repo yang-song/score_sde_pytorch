@@ -259,10 +259,12 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     
     t = t * (sde.T - eps) + eps
 
-    mu_sigma = torch.stack((batch, torch.zeros_like(batch)), dim=4)
+    #CIMSDE: mu_sigma = torch.stack((batch, torch.zeros_like(batch)), dim=4)
 
     with torch.no_grad():
-      perturbed_data = sde.numerical_sample(x0s=mu_sigma, ts=t)
+      #CIMSDE: perturbed_data = sde.numerical_sample(x0s=mu_sigma, ts=t)
+      perturbed_data = sde.numerical_sample(x0s=batch, ts=t)
+      
       #mean, std = sde.marginal_prob(batch, t)
       #z = torch.randn_like(batch)
       #perturbed_data_analytic = mean + std[:, None, None, None] * z
