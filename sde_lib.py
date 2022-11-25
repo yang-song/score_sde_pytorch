@@ -8,7 +8,6 @@ import logging
 import scipy
 import h5py
 
-
 class importance_sampler():
   def __init__(self, N, h=50):
     """Construct a loss scaler for importance sampling
@@ -257,7 +256,11 @@ class SDE(abc.ABC):
         return rev_f, rev_G
 
     return RSDE()
-class VPSDE(SDE):
+
+
+#class VPSDE_working_with_small_nn(SDE):
+class VPSDE_working_sampling(SDE):
+  """Working version of VPSDE for small NN"""
   def __init__(self, beta_min=0.1, beta_max=20, N=1000):
     """Construct a Variance Preserving SDE.
 
@@ -334,12 +337,15 @@ class VPSDE(SDE):
       t += self.dt.item()
 
 
-    if not prior_sampling:
+    if True:# not prior_sampling:
+      #
       if "full_forward_trajectories" in os.environ.get('DEBUG'):
-        if self.debug_sampling_counter % 100 == 0:
+        if True: #self.debug_sampling_counter % 100 == 0:
           with h5py.File("debug_data.h5", 'a') as F:
             F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/xs', data=np.concatenate(debug_all_xs))
             F.create_dataset(f'forward/trajectories/{str(self.debug_sampling_counter).zfill(5)}/ts', data=np.concatenate(debug_all_ts))
+        #disable so we only dump one batch of forward
+        os.environ["DEBUG"] = os.environ["DEBUG"].replace("full_forward_trajectories","")
       if "terminal_forward_samples" in os.environ.get('DEBUG'):
         try:
           with h5py.File("debug_data.h5", 'a') as F:
@@ -351,6 +357,7 @@ class VPSDE(SDE):
           with h5py.File("debug_data.h5", "a") as F:
             F.create_dataset('forward/terminal/xTs', data=xs.cpu().numpy(), chunks=True, maxshape=(None,)*len(xs.shape))
             F.create_dataset('forward/terminal/ts', data=ts.cpu().numpy(), chunks=True, maxshape=(None,)*len(ts.shape))
+        os.environ["DEBUG"] = os.environ["DEBUG"].replace("terminal_forward_samples","")
             
     self.debug_sampling_counter += 1
 
@@ -389,8 +396,8 @@ class VPSDE(SDE):
     return f, G
 
 
-#class VPSDE(VPSDE_working_sampling):
-class VPSDE_nonworking_(VPSDE):
+class CIMSDE(VPSDE_working_sampling):
+#class VPSDE(VPSDE_working_with_small_nn):
   """
   First attempt at CIM SDE
    - for CIM SDE, x = [mu, sigma]
@@ -558,7 +565,8 @@ class VPSDE_nonworking_(VPSDE):
     else:
       return xs[:,:,:,:,0] #return only mu
 
-
+VPSDE = VPSDE_working_sampling
+#VPSDE = CIMSDE
 
 class VPSDE_original(SDE):
   def __init__(self, beta_min=0.1, beta_max=20, N=1000):

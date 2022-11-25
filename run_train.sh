@@ -9,8 +9,8 @@
 
 export DEBUG=""
 export DEBUG="$DEBUG full_backward_trajectories"
-#export DEBUG="$DEBUG full_forward_trajectories"
-#export DEBUG="$DEBUG terminal_forward_samples"
+export DEBUG="$DEBUG full_forward_trajectories"
+export DEBUG="$DEBUG terminal_forward_samples"
 export DEBUG="$DEBUG importance_sampler_weighting"
 export DEBUG="$DEBUG training_loss"
 export DEBUG="$DEBUG backward_score_evaluations"

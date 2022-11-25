@@ -44,13 +44,13 @@ def get_config():
   model.ema_rate = 0.9999
   model.normalization = 'GroupNorm'
   model.nonlinearity = 'swish'
-  model.nf = 128
-  model.ch_mult = (1, 2, 2, 2)
-  model.num_res_blocks = 4
-  model.attn_resolutions = (16,)
+  model.nf = 4
+  model.ch_mult = (1, 2)#, 2, 2)
+  model.num_res_blocks = 1
+  model.attn_resolutions = (4,) #never(2,)
   model.resamp_with_conv = True
   model.conditional = True
-  model.fir = True
+  model.fir = False
   model.fir_kernel = [1, 3, 3, 1]
   model.skip_rescale = True
   model.resblock_type = 'biggan'
@@ -61,5 +61,7 @@ def get_config():
   model.init_scale = 0.0
   model.embedding_type = 'positional'
   model.conv_size = 3
+
+
 
   return config

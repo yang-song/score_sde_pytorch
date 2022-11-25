@@ -22,7 +22,7 @@ def get_default_configs():
   # sampling
   config.sampling = sampling = ml_collections.ConfigDict()
   sampling.n_steps_each = 1
-  sampling.noise_removal = True
+  sampling.noise_removal = False
   sampling.probability_flow = False
   sampling.snr = 0.16
 
@@ -41,7 +41,7 @@ def get_default_configs():
   # data
   config.data = data = ml_collections.ConfigDict()
   data.dataset = 'CIFAR10'
-  data.dataset = 'MNIST'
+  data.dataset = '3OnesOnZeros' #MNIST
   data.image_size = 8
   data.random_flip = False  #was True, should not use with MNIST
   data.centered = False
@@ -55,14 +55,14 @@ def get_default_configs():
   model.num_scales = 1000
   model.beta_min = 0.1
   model.beta_max = 20.
-  model.dropout = 0.1
+  model.dropout = 0.1 
   model.embedding_type = 'fourier'
 
   # optimization
   config.optim = optim = ml_collections.ConfigDict()
   optim.weight_decay = 0
   optim.optimizer = 'Adam'
-  optim.lr = 2e-4
+  optim.lr = 2e-5
   optim.beta1 = 0.9
   optim.eps = 1e-8
   optim.warmup = 2500

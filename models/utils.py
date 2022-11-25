@@ -19,7 +19,7 @@
 import torch
 import sde_lib
 import numpy as np
-
+import time
 
 _MODELS = {}
 
@@ -116,6 +116,16 @@ def get_model_fn(model, train=False):
     Returns:
       A tuple of (model output, new mutable states)
     """
+
+
+    if False:
+      print("PARAMS:")
+      total_params = 0
+      for parameter in model.parameters():
+        total_params += torch.numel(parameter)
+        
+      print(f"Total of {total_params} parameters in model")
+
     if not train:
       model.eval()
       return model(x, labels)
@@ -139,6 +149,7 @@ def get_score_fn(sde, model, train=False, continuous=False):
     A score function.
   """
   model_fn = get_model_fn(model, train=train)
+
 
   if isinstance(sde, sde_lib.VPSDE) or isinstance(sde, sde_lib.subVPSDE):
     def score_fn(x, t):

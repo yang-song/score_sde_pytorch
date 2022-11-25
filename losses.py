@@ -255,15 +255,15 @@ def get_sliced_score_matching_loss_fn(sde, train, reduce_mean=True, continuous=T
     else:
       raise NotImplementedError
 
-    #print("Timesteps in this batch: ", T_idx)
+    print("Timesteps in this batch: ", T_idx)
     
     t = t * (sde.T - eps) + eps
 
-    #CIMSDE: mu_sigma = torch.stack((batch, torch.zeros_like(batch)), dim=4)
+    #mu_sigma = torch.stack((batch, torch.zeros_like(batch)), dim=4) #CIMSDE
 
     with torch.no_grad():
-      #CIMSDE: perturbed_data = sde.numerical_sample(x0s=mu_sigma, ts=t)
-      perturbed_data = sde.numerical_sample(x0s=batch, ts=t)
+      #perturbed_data = sde.numerical_sample(x0s=mu_sigma, ts=t)  #CIMSDE
+      perturbed_data = sde.numerical_sample(x0s=batch, ts=t) #VPSDE
       
       #mean, std = sde.marginal_prob(batch, t)
       #z = torch.randn_like(batch)

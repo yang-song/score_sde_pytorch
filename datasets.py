@@ -18,7 +18,7 @@
 import jax
 import tensorflow as tf
 import tensorflow_datasets as tfds
-
+import numpy as np
 
 def get_data_scaler(config):
   """Data normalizer. Assume data are always in [0, 1]."""
@@ -80,7 +80,6 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
     train_ds, eval_ds, dataset_builder.
   """
 
-
   # Compute batch size for this worker.
   batch_size = config.training.batch_size if not evaluation else config.eval.batch_size
   if batch_size % jax.device_count() != 0:
@@ -102,7 +101,7 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
       img = tf.image.convert_image_dtype(img, tf.float32)
       return tf.image.resize(img, [config.data.image_size, config.data.image_size], antialias=True)
 
-  elif config.data.dataset == 'MNIST':
+  elif config.data.dataset in ['MNIST', '3OnesOnZeros']:
     dataset_builder = tfds.builder('mnist')
     train_split_name = 'train'
     eval_split_name = 'test'
@@ -172,6 +171,24 @@ def get_dataset(config, uniform_dequantization=False, evaluation=False):
       if uniform_dequantization:
         img = (tf.random.uniform(img.shape, dtype=tf.float32) + img * 255.) / 256.
       return dict(image=img, label=None)
+  
+  elif config.data.dataset in ['3OnesOnZeros']:
+    
+    def preprocess_fn(d):
+
+      img = resize_op(d['image'])
+
+      sz = config.data.image_size**2
+      shp = img.shape
+      img = np.zeros(sz)
+      elements = np.random.randint(0, sz, 3)
+      for e in elements:
+        img[e] = 1.0
+      img = tf.constant(img)
+      img = tf.reshape(img, shp)
+      
+      return dict(image=img, label=d.get('label', None))
+      
 
   else:
     def preprocess_fn(d):
